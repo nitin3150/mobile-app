@@ -268,15 +268,15 @@ export function OrderStatusBanner() {
                 </View>
                 <View style={styles.textContainer}>
                   <Text style={[styles.restaurantName, { color: config.textColor }]}>
-                    {activeOrder.restaurant_name || 'Restaurant Name'}
+                      {config.text}
                   </Text>
-                  <Text style={styles.statusText}>{config.text} ▸</Text>
+                  {/* <Text style={styles.statusText}>{config.text} ▸</Text> */}
                 </View>
-                {activeOrder.estimated_delivery_time && (
+                {activeOrder.estimated_delivery && (
                   <View style={styles.timeContainer}>
                     <Text style={styles.timeText}>arriving in</Text>
                     <Text style={styles.timeValue}>
-                      {activeOrder.estimated_delivery_time} mins
+                      {activeOrder.estimated_delivery} mins
                     </Text>
                   </View>
                 )}
@@ -291,10 +291,10 @@ export function OrderStatusBanner() {
                     <Ionicons name="restaurant" size={22} color="#1C1C1C" />
                   </View>
                   <View style={styles.ratingTextContainer}>
-                    <Text style={[styles.restaurantName, { color: config.textColor }]}>
+                    {/* <Text style={[styles.restaurantName, { color: config.textColor }]}>
                       {activeOrder.restaurant_name || 'Restaurant Name'}
-                    </Text>
-                    <Text style={styles.ratingQuestion}>How was your food?</Text>
+                    </Text> */}
+                    <Text style={styles.ratingQuestion}>How was your experience?</Text>
                   </View>
                   <View style={styles.starsContainer}>
                     {[1, 2, 3, 4, 5].map((star) => (

@@ -33,7 +33,7 @@ export default function DeliveryScreen() {
     
     try {
       console.log('Fetching available orders...');
-      const response = await fetch(`${API_BASE_URL}delivery/available`, {
+      const response = await fetch(`${API_BASE_URL}/delivery/available`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -62,7 +62,7 @@ export default function DeliveryScreen() {
     
     try {
       console.log('Fetching assigned orders...');
-      const response = await fetch(`${API_BASE_URL}delivery/assigned`, {
+      const response = await fetch(`${API_BASE_URL}/delivery/assigned`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -91,7 +91,7 @@ export default function DeliveryScreen() {
     
     try {
       console.log('Fetching delivered orders...');
-      const response = await fetch(`${API_BASE_URL}delivery/delivered`, {
+      const response = await fetch(`${API_BASE_URL}/delivery/delivered`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -180,7 +180,7 @@ export default function DeliveryScreen() {
             try {
               console.log('Accepting order:', orderId);
               
-              const response = await fetch(`${API_BASE_URL}delivery/${orderId}/accept`, {
+              const response = await fetch(`${API_BASE_URL}/delivery/${orderId}/accept`, {
                 method: 'POST',
                 headers: {
                   'Authorization': `Bearer ${token}`,
@@ -226,7 +226,7 @@ export default function DeliveryScreen() {
             try {
               console.log('Marking order as delivered:', orderId);
               
-              const response = await fetch(`${API_BASE_URL}delivery/${orderId}/mark-delivered`, {
+              const response = await fetch(`${API_BASE_URL}/delivery/${orderId}/mark-delivered`, {
                 method: 'POST',
                 headers: {
                   'Authorization': `Bearer ${token}`,

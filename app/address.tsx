@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,7 +10,6 @@ import {
   Platform,
   FlatList,
   ActivityIndicator,
-  Keyboard,
   ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -18,16 +17,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Location from 'expo-location';
 import { useAuth } from '../contexts/AuthContext';
-import { API_BASE_URL } from '../config/apiConfig';
-
-interface SearchResult {
-  place_id: string;
-  description: string;
-  structured_formatting: {
-    main_text: string;
-    secondary_text: string;
-  };
-}
+import { API_ENDPOINTS } from '../config/apiConfig';
+import { authenticatedFetch } from '../utils/authenticatedFetch';
 
 interface SavedAddress {
   _id: string;
@@ -61,14 +52,8 @@ export default function AddressScreen() {
   // Location states
   const [latitude, setLatitude] = useState<number | null>(null);
   const [longitude, setLongitude] = useState<number | null>(null);
-  const [locationLoading, setLocationLoading] = useState(true);
+  const [locationLoading, setLocationLoading] = useState(false);
   const [locationAddress, setLocationAddress] = useState<string>('');
-  
-  // Search states
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [showSearchResults, setShowSearchResults] = useState(false);
   
   // Manual address form states
   const [manualAddress, setManualAddress] = useState<ManualAddressForm>({
@@ -78,7 +63,7 @@ export default function AddressScreen() {
     state: '',
     pincode: '',
     landmark: '',
-    mobile_number: '',
+    mobile_number: user?.phone?.replace('+91', '') || '',
   });
   
   // Saved addresses states
@@ -88,113 +73,97 @@ export default function AddressScreen() {
   
   // General states
   const [loading, setLoading] = useState(false);
-  const [currentTab, setCurrentTab] = useState<'saved' | 'search'>('saved');
+  const [currentTab, setCurrentTab] = useState<'saved' | 'add'>('saved');
   
   // Editing states
   const [editingAddress, setEditingAddress] = useState<SavedAddress | null>(null);
   const [editMode, setEditMode] = useState(false);
 
-  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
+  // Get current location and reverse geocode
   const getCurrentLocation = useCallback(async () => {
-    console.log('=== START getCurrentLocation ===');
+    console.log('📍 Getting current location...');
     
+    setLocationLoading(true);
     try {
-      setLocationLoading(true);
+      // Request permissions
+      const { status } = await Location.requestForegroundPermissionsAsync();
       
-      const currentStatus = await Location.getForegroundPermissionsAsync();
-      
-      if (!currentStatus.granted) {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== 'granted') {
-          throw new Error('Permission denied');
-        }
+      if (status !== 'granted') {
+        Alert.alert('Permission Denied', 'Location permission is required to detect your address.');
+        setLocationLoading(false);
+        return;
       }
-  
+
+      // Get current position
       const location = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
       });
       
       const { latitude: lat, longitude: lng } = location.coords;
-      console.log('Location received:', lat, lng);
+      console.log('📍 Location received:', lat, lng);
       
-      // Set coordinates immediately
+      // Set coordinates
       setLatitude(lat);
       setLongitude(lng);
-      setLocationLoading(false); // Stop loading immediately
       
-      // Check if coordinates are in India (rough bounds)
+      // Check if in India
       const isInIndia = lat >= 8.4 && lat <= 37.6 && lng >= 68.7 && lng <= 97.25;
       
       if (!isInIndia) {
-        console.log('Coordinates outside India, using default location');
-        setLatitude(12.9716); // Bangalore
-        setLongitude(77.5946);
-        setLocationAddress('Bangalore, India - Please search your exact address');
         Alert.alert(
-          'Location Notice',
-          'Detected location is outside India. Defaulting to Bangalore. Please use search to find your address.',
-          [{ text: 'OK' }]
+          'Location Outside India',
+          'SmartBag currently operates only in India. Please enter your Indian address manually.'
         );
+        setLocationLoading(false);
         return;
       }
-  
-      // Try reverse geocoding (non-blocking)
-      getAddressFromCoordinates(lat, lng).catch(err => {
-        console.log('Reverse geocoding failed (non-critical):', err);
-        setLocationAddress('Location detected - Use search for exact address');
-      });
+
+      // Reverse geocode to get address
+      await getAddressFromCoordinates(lat, lng);
       
     } catch (error) {
-      console.error('Location error:', error);
-      
-      // Default to Bangalore
-      setLatitude(12.9716);
-      setLongitude(77.5946);
-      setLocationAddress('Bangalore, India - Search or enter your address');
+      console.error('📍 Location error:', error);
+      Alert.alert(
+        'Location Error',
+        'Failed to get your location. Please enter address manually.'
+      );
+    } finally {
       setLocationLoading(false);
     }
   }, []);
- 
 
-  const getAddressFromCoordinates = useCallback(async (lat: number, lng: number, fallbackAddress?: string) => {
+  // Reverse geocode coordinates to address
+  const getAddressFromCoordinates = async (lat: number, lng: number) => {
     try {
-      console.log('Starting reverse geocoding for:', lat, lng);
+      console.log('🔄 Reverse geocoding:', lat, lng);
       
-      // Add timeout to reverse geocoding
-      const geocodePromise = fetch(`${API_BASE_URL}reverse-geocode`, {
+      const response = await fetch(API_ENDPOINTS.REVERSE_GEOCODE, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ latitude: lat, longitude: lng }),
+        signal: AbortSignal.timeout(10000), // 10 second timeout
       });
-      
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Reverse geocode timeout')), 8000)
-      );
-      
-      const response = await Promise.race([geocodePromise, timeoutPromise]) as Response;
-      console.log('Reverse geocode response received');
-  
+
       if (response.ok) {
         const result = await response.json();
+        console.log('✅ Reverse geocode result:', result);
         
         if (result && result.formatted_address) {
           setLocationAddress(result.formatted_address);
-          console.log('Address set:', result.formatted_address);
           
-          // Parse and update form
+          // Parse address components
           if (result.address_components) {
-            const addressComponents = result.address_components;
+            const components = result.address_components;
             let street = '', city = '', state = '', pincode = '';
             
-            for (const component of addressComponents) {
+            for (const component of components) {
               const types = component.types || [];
               
               if (types.includes('street_number') || types.includes('route')) {
                 street += component.long_name + ' ';
-              } else if (types.includes('locality')) {
+              } else if (types.includes('sublocality') || types.includes('locality')) {
                 city = component.long_name;
               } else if (types.includes('administrative_area_level_1')) {
                 state = component.long_name;
@@ -203,59 +172,27 @@ export default function AddressScreen() {
               }
             }
             
+            // Update form with detected address
             setManualAddress(prev => ({
               ...prev,
-              street: street.trim() || fallbackAddress || '',
+              street: street.trim() || result.formatted_address,
               city: city || '',
               state: state || '',
               pincode: pincode || '',
             }));
-          }
-        } else {
-          // If reverse geocoding fails but we have a fallback address, populate the form
-          if (fallbackAddress) {
-            const addressParts = fallbackAddress.split(',').map(s => s.trim());
-            setManualAddress(prev => ({
-              ...prev,
-              street: addressParts[0] || fallbackAddress,
-              city: addressParts[1] || '',
-              state: addressParts[2] || '',
-              pincode: addressParts.find(part => /^\d{6}$/.test(part)) || '',
-            }));
+            
+            Alert.alert('Location Detected', 'Please review and complete the address details below.');
           }
         }
       } else {
-        console.log('Reverse geocode response not OK:', response.status);
-        // Fallback to using the provided address
-        if (fallbackAddress) {
-          const addressParts = fallbackAddress.split(',').map(s => s.trim());
-          setManualAddress(prev => ({
-            ...prev,
-            street: addressParts[0] || fallbackAddress,
-            city: addressParts[1] || '',
-            state: addressParts[2] || '',
-            pincode: addressParts.find(part => /^\d{6}$/.test(part)) || '',
-          }));
-        }
+        console.error('❌ Reverse geocode failed:', response.status);
+        Alert.alert('Notice', 'Could not get detailed address. Please fill in the details manually.');
       }
     } catch (error) {
-      console.error('Reverse geocoding error:', error);
-      // Don't fail, just set a generic address
-      setLocationAddress('Location detected - Use search for exact address');
-      
-      // Fallback to using the provided address
-      if (fallbackAddress) {
-        const addressParts = fallbackAddress.split(',').map(s => s.trim());
-        setManualAddress(prev => ({
-          ...prev,
-          street: addressParts[0] || fallbackAddress,
-          city: addressParts[1] || '',
-          state: addressParts[2] || '',
-          pincode: addressParts.find(part => /^\d{6}$/.test(part)) || '',
-        }));
-      }
+      console.error('❌ Reverse geocoding error:', error);
+      Alert.alert('Notice', 'Could not get address details. Please enter manually.');
     }
-  }, []);
+  };
 
   // Fetch saved addresses
   const fetchSavedAddresses = useCallback(async () => {
@@ -263,11 +200,7 @@ export default function AddressScreen() {
     
     setLoadingSavedAddresses(true);
     try {
-      const response = await fetch(`${API_BASE_URL}address/my`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
+      const response = await authenticatedFetch(API_ENDPOINTS.MY_ADDRESS);
       
       if (response.ok) {
         const addresses = await response.json();
@@ -285,108 +218,7 @@ export default function AddressScreen() {
     }
   }, [token, selectedAddress]);
 
-  // Search addresses using Ola Maps
-  const performAddressSearch = useCallback(async (query: string) => {
-    if (!query.trim() || query.trim().length < 3) {
-      setSearchResults([]);
-      setShowSearchResults(false);
-      return;
-    }
-    
-    setSearching(true);
-    try {
-      const response = await fetch(`${API_BASE_URL}address/search-addresses`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ query: query.trim() }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        
-        if (data && data.predictions && data.predictions.length > 0) {
-          setSearchResults(data.predictions);
-          setShowSearchResults(true);
-        } else {
-          setSearchResults([{
-            place_id: 'manual',
-            description: query,
-            structured_formatting: {
-              main_text: query,
-              secondary_text: 'Enter this address manually'
-            }
-          }]);
-          setShowSearchResults(true);
-        }
-      } else {
-        throw new Error(`Search failed: ${response.status}`);
-      }
-    } catch (error) {
-      console.error('Address search error:', error);
-      setSearchResults([{
-        place_id: 'manual_fallback',
-        description: query,
-        structured_formatting: {
-          main_text: query,
-          secondary_text: 'Search failed - enter manually'
-        }
-      }]);
-      setShowSearchResults(true);
-    } finally {
-      setSearching(false);
-    }
-  }, []);
-
-  // Select search result
-  const selectSearchResult = useCallback(async (result: SearchResult) => {
-    setSearchQuery(result.description);
-    setShowSearchResults(false);
-    Keyboard.dismiss();
-    
-    if (result.place_id.includes('manual')) {
-      const addressParts = result.description.split(',').map(s => s.trim());
-      if (addressParts.length > 0) {
-        setManualAddress(prev => ({
-          ...prev,
-          street: addressParts[0] || '',
-          city: addressParts[1] || '',
-          state: addressParts[2] || '',
-        }));
-      }
-      return;
-    }
-    
-    try {
-      const response = await fetch(`${API_BASE_URL}address/geocode`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ address: result.description }),
-      });
-
-      if (response.ok) {
-        const geocodeResult = await response.json();
-        
-        if (geocodeResult && geocodeResult.latitude && geocodeResult.longitude) {
-          setLatitude(geocodeResult.latitude);
-          setLongitude(geocodeResult.longitude);
-          setLocationAddress(geocodeResult.formatted_address || result.description);
-          
-          // Get detailed address and update form
-          await getAddressFromCoordinates(geocodeResult.latitude, geocodeResult.longitude, result.description);
-        }
-      }
-    } catch (error) {
-      console.error('Geocoding error:', error);
-      Alert.alert('Error', 'Failed to get location details. Please enter address manually.');
-    }
-  }, []);
-
-
-  // Save manual address
+  // Save new address with coordinates
   const saveManualAddress = async () => {
     if (!manualAddress.street.trim() || !manualAddress.city.trim() || !manualAddress.pincode.trim() || !manualAddress.mobile_number.trim()) {
       Alert.alert('Error', 'Please fill in all required fields (Street, City, Pincode, and Mobile Number)');
@@ -410,17 +242,24 @@ export default function AddressScreen() {
 
     setLoading(true);
     try {
+      // ✅ Include coordinates in the address data
       const addressData = {
         ...manualAddress,
-        latitude: latitude || 0,
-        longitude: longitude || 0,
+        latitude: latitude || 0,  // ✅ Save coordinates
+        longitude: longitude || 0,  // ✅ Save coordinates
       };
 
-      const response = await fetch(`${API_BASE_URL}address/`, {
+      console.log('💾 Saving address with coordinates:', {
+        street: addressData.street,
+        city: addressData.city,
+        latitude: addressData.latitude,
+        longitude: addressData.longitude,
+      });
+
+      const response = await authenticatedFetch(API_ENDPOINTS.USER_ADDRESS, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify(addressData),
       });
@@ -430,6 +269,7 @@ export default function AddressScreen() {
         
         await fetchSavedAddresses();
         
+        // Reset form
         setManualAddress({
           label: 'Home',
           street: '',
@@ -437,8 +277,13 @@ export default function AddressScreen() {
           state: '',
           pincode: '',
           landmark: '',
-          mobile_number: '',
+          mobile_number: user?.phone?.replace('+91', '') || '',
         });
+        
+        // Clear location
+        setLatitude(null);
+        setLongitude(null);
+        setLocationAddress('');
         
         setCurrentTab('saved');
       } else {
@@ -453,34 +298,67 @@ export default function AddressScreen() {
     }
   };
 
+  // Update existing address
+  const updateAddress = async () => {
+    if (!editingAddress) return;
+    
+    if (!manualAddress.street.trim() || !manualAddress.city.trim() || !manualAddress.pincode.trim() || !manualAddress.mobile_number.trim()) {
+      Alert.alert('Error', 'Please fill in all required fields');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const addressData = {
+        ...manualAddress,
+        latitude: latitude || editingAddress.latitude || 0,
+        longitude: longitude || editingAddress.longitude || 0,
+      };
+
+      const response = await authenticatedFetch(
+        `${API_ENDPOINTS.USER_ADDRESS}/${editingAddress._id}`,
+        {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(addressData),
+        }
+      );
+
+      if (response.ok) {
+        Alert.alert('Success', 'Address updated successfully!');
+        await fetchSavedAddresses();
+        cancelEdit();
+      } else {
+        const errorData = await response.json();
+        Alert.alert('Error', errorData.detail || 'Failed to update address');
+      }
+    } catch (error) {
+      console.error('Error updating address:', error);
+      Alert.alert('Error', 'Network error. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Set default address
   const selectAndSetDefault = async (address: SavedAddress) => {
     try {
-      const response = await fetch(`${API_BASE_URL}address/${address._id}/set-default`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
+      const response = await authenticatedFetch(
+        `${API_ENDPOINTS.USER_ADDRESS}/${address._id}/set-default`,
+        {
+          method: 'POST',
+        }
+      );
 
       if (response.ok) {
         setSelectedAddress(address);
         
         if (isFromCheckout) {
-          const fullAddress = `${address.street}, ${address.city}, ${address.state}, ${address.pincode}`;
           router.back();
-          setTimeout(() => {
-            router.setParams({
-              address: address.street,
-              city: address.city,
-              state: address.state,
-              pincode: address.pincode,
-              fullAddress: fullAddress,
-              addressLabel: address.label,
-            });
-          }, 100);
         } else {
-          Alert.alert('Success', 'Default address updated successfully');
+          Alert.alert('Success', 'Default address updated');
           await fetchSavedAddresses();
         }
       } else {
@@ -496,6 +374,8 @@ export default function AddressScreen() {
   const editAddress = (address: SavedAddress) => {
     setEditingAddress(address);
     setEditMode(true);
+    setLatitude(address.latitude || null);
+    setLongitude(address.longitude || null);
     setManualAddress({
       label: address.label,
       street: address.street,
@@ -505,80 +385,16 @@ export default function AddressScreen() {
       landmark: address.landmark || '',
       mobile_number: address.mobile_number || '',
     });
-    setCurrentTab('search');
-  };
-
-  // Update address
-  const updateAddress = async () => {
-    if (!editingAddress) return;
-    
-    if (!manualAddress.street.trim() || !manualAddress.city.trim() || !manualAddress.pincode.trim() || !manualAddress.mobile_number.trim()) {
-      Alert.alert('Error', 'Please fill in all required fields (Street, City, Pincode, and Mobile Number)');
-      return;
-    }
-
-    if (manualAddress.pincode.length !== 6) {
-      Alert.alert('Error', 'Please enter a valid 6-digit pincode');
-      return;
-    }
-
-    if (manualAddress.mobile_number.length !== 10) {
-      Alert.alert('Error', 'Please enter a valid 10-digit mobile number');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const addressData = {
-        ...manualAddress,
-        latitude: latitude || editingAddress.latitude || 0,
-        longitude: longitude || editingAddress.longitude || 0,
-      };
-
-      const response = await fetch(`${API_BASE_URL}address/${editingAddress._id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify(addressData),
-      });
-
-      if (response.ok) {
-        Alert.alert('Success', 'Address updated successfully!');
-        
-        await fetchSavedAddresses();
-        
-        // Reset form and exit edit mode
-        setManualAddress({
-          label: 'Home',
-          street: '',
-          city: '',
-          state: '',
-          pincode: '',
-          landmark: '',
-          mobile_number: '',
-        });
-        
-        setEditingAddress(null);
-        setEditMode(false);
-        setCurrentTab('saved');
-      } else {
-        const errorData = await response.json();
-        Alert.alert('Error', errorData.detail || 'Failed to update address');
-      }
-    } catch (error) {
-      console.error('Error updating address:', error);
-      Alert.alert('Error', 'Network error. Please try again.');
-    } finally {
-      setLoading(false);
-    }
+    setCurrentTab('add');
   };
 
   // Cancel edit
   const cancelEdit = () => {
     setEditingAddress(null);
     setEditMode(false);
+    setLatitude(null);
+    setLongitude(null);
+    setLocationAddress('');
     setManualAddress({
       label: 'Home',
       street: '',
@@ -586,8 +402,9 @@ export default function AddressScreen() {
       state: '',
       pincode: '',
       landmark: '',
-      mobile_number: '',
+      mobile_number: user?.phone?.replace('+91', '') || '',
     });
+    setCurrentTab('saved');
   };
 
   // Delete address
@@ -602,12 +419,12 @@ export default function AddressScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              const response = await fetch(`${API_BASE_URL}address/${addressId}`, {
-                method: 'DELETE',
-                headers: {
-                  'Authorization': `Bearer ${token}`,
-                },
-              });
+              const response = await authenticatedFetch(
+                `${API_ENDPOINTS.USER_ADDRESS}/${addressId}`,
+                {
+                  method: 'DELETE',
+                }
+              );
 
               if (response.ok) {
                 Alert.alert('Success', 'Address deleted successfully');
@@ -624,97 +441,64 @@ export default function AddressScreen() {
     );
   };
 
-  // useEffect(() => {
-  //   getCurrentLocation();
-  //   fetchSavedAddresses();
-  // }, []);
-
   useEffect(() => {
     console.log('Address screen mounted');
-    
-    // Load saved addresses immediately
     fetchSavedAddresses();
-    
-    // Set default location immediately (don't wait for GPS)
-    setLatitude(19.0760);
-    setLongitude(72.8777);
-    setLocationLoading(false);
-    setLocationAddress('Tap "Update Location" to detect your current position');
-    
-    // Don't auto-detect location on mount for emulator
-    // Users can manually trigger it with the "Update Location" button
   }, []);
-  
-  // Search with debouncing
-  useEffect(() => {
-    if (searchTimeoutRef.current) {
-      clearTimeout(searchTimeoutRef.current);
-    }
 
-    if (searchQuery.length > 2) {
-      searchTimeoutRef.current = setTimeout(() => {
-        performAddressSearch(searchQuery);
-      }, 300);
-    } else {
-      setSearchResults([]);
-      setShowSearchResults(false);
-    }
-
-    return () => {
-      if (searchTimeoutRef.current) {
-        clearTimeout(searchTimeoutRef.current);
-      }
-    };
-  }, [searchQuery, performAddressSearch]);
-
-  // Render location display (replaces map)
+  // Render location display
   const renderLocationDisplay = () => {
-    if (latitude === null || longitude === null) {
-      return (
-        <View style={styles.locationContainer}>
+    return (
+      <View style={styles.locationContainer}>
+        {locationLoading ? (
           <View style={styles.locationLoadingContent}>
             <ActivityIndicator size="large" color="#007AFF" />
             <Text style={styles.locationLoadingText}>Detecting your location...</Text>
           </View>
-        </View>
-      );
-    }
-
-    return (
-      <View style={styles.locationContainer}>
-        <View style={styles.locationInfo}>
-          <Ionicons name="location" size={64} color="#007AFF" />
-          <Text style={styles.locationTitle}>Current Location</Text>
-          {locationAddress ? (
-            <Text style={styles.locationAddress} numberOfLines={2}>
-              {locationAddress}
-            </Text>
-          ) : (
-            <Text style={styles.locationCoords}>
-              {latitude.toFixed(6)}, {longitude.toFixed(6)}
-            </Text>
-          )}
-          
-          <TouchableOpacity
-            style={styles.updateLocationButton}
-            onPress={getCurrentLocation}
-            disabled={locationLoading}
-          >
-            {locationLoading ? (
-              <ActivityIndicator size="small" color="#fff" />
+        ) : latitude && longitude ? (
+          <View style={styles.locationInfo}>
+            <Ionicons name="location" size={48} color="#007AFF" />
+            <Text style={styles.locationTitle}>Location Detected</Text>
+            {locationAddress ? (
+              <Text style={styles.locationAddress} numberOfLines={3}>
+                {locationAddress}
+              </Text>
             ) : (
-              <>
-                <Ionicons name="refresh" size={16} color="#fff" />
-                <Text style={styles.updateLocationText}>Update Location</Text>
-              </>
+              <Text style={styles.locationCoords}>
+                {latitude.toFixed(6)}, {longitude.toFixed(6)}
+              </Text>
             )}
-          </TouchableOpacity>
-        </View>
+            
+            <TouchableOpacity
+              style={styles.updateLocationButton}
+              onPress={getCurrentLocation}
+            >
+              <Ionicons name="refresh" size={16} color="#fff" />
+              <Text style={styles.updateLocationText}>Update Location</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={styles.locationInfo}>
+            <Ionicons name="location-outline" size={48} color="#999" />
+            <Text style={styles.locationTitle}>No Location Detected</Text>
+            <Text style={styles.locationSubtitle}>
+              Tap below to detect your current location
+            </Text>
+            
+            <TouchableOpacity
+              style={styles.detectLocationButton}
+              onPress={getCurrentLocation}
+            >
+              <Ionicons name="navigate" size={16} color="#fff" />
+              <Text style={styles.detectLocationText}>Detect My Location</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
     );
   };
 
-  // Render saved addresses
+  // Render saved address card
   const renderSavedAddress = ({ item }: { item: SavedAddress }) => (
     <View style={[
       styles.savedAddressCard,
@@ -729,8 +513,7 @@ export default function AddressScreen() {
             <Ionicons 
               name={item.label === 'Home' ? 'home' : item.label === 'Office' ? 'business' : 'location'} 
               size={20} 
-              color="#007AFF" 
-            />
+              color="#007AFF" />
             <Text style={styles.addressLabel}>{item.label}</Text>
             {item.is_default && (
               <View style={styles.defaultBadge}>
@@ -753,6 +536,11 @@ export default function AddressScreen() {
         {item.mobile_number && (
           <Text style={styles.mobileText}>📱 {item.mobile_number}</Text>
         )}
+        {item.latitude && item.longitude && (
+          <Text style={styles.coordsText}>
+            📍 {item.latitude.toFixed(4)}, {item.longitude.toFixed(4)}
+          </Text>
+        )}
       </TouchableOpacity>
       
       <View style={styles.addressActions}>
@@ -770,21 +558,6 @@ export default function AddressScreen() {
         </TouchableOpacity>
       </View>
     </View>
-  );
-
-  // Render search results
-  const renderSearchResult = ({ item }: { item: SearchResult }) => (
-    <TouchableOpacity
-      style={styles.searchResultItem}
-      onPress={() => selectSearchResult(item)}
-    >
-      <Ionicons name="location-outline" size={20} color="#666" />
-      <View style={styles.searchResultText}>
-        <Text style={styles.searchResultMain}>{item.structured_formatting.main_text}</Text>
-        <Text style={styles.searchResultSecondary}>{item.structured_formatting.secondary_text}</Text>
-      </View>
-      <Ionicons name="chevron-forward" size={16} color="#999" />
-    </TouchableOpacity>
   );
 
   return (
@@ -821,26 +594,21 @@ export default function AddressScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.tab, currentTab === 'search' && styles.activeTab]}
-            onPress={() => setCurrentTab('search')}
+            style={[styles.tab, currentTab === 'add' && styles.activeTab]}
+            onPress={() => setCurrentTab('add')}
           >
             <Ionicons 
               name="add-outline" 
               size={20} 
-              color={currentTab === 'search' ? '#007AFF' : '#666'} 
+              color={currentTab === 'add' ? '#007AFF' : '#666'} 
             />
-            <Text style={[styles.tabText, currentTab === 'search' && styles.activeTabText]}>
+            <Text style={[styles.tabText, currentTab === 'add' && styles.activeTabText]}>
               Add New Address
             </Text>
           </TouchableOpacity>
         </View>
 
         <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-          {/* Location Display Section */}
-          <View style={styles.locationSection}>
-            {renderLocationDisplay()}
-          </View>
-
           {/* Saved Addresses Tab */}
           {currentTab === 'saved' && (
             <View style={styles.savedAddressesContainer}>
@@ -867,14 +635,14 @@ export default function AddressScreen() {
                   <Text style={styles.emptySubtext}>Add your first address to get started</Text>
                   <TouchableOpacity
                     style={styles.addFirstAddressButton}
-                    onPress={() => setCurrentTab('search')}
+                    onPress={() => setCurrentTab('add')}
                   >
                     <Text style={styles.addFirstAddressText}>Add Address</Text>
                   </TouchableOpacity>
                 </View>
               )}
 
-              {selectedAddress && (
+              {selectedAddress && isFromCheckout && (
                 <TouchableOpacity 
                   style={styles.selectButton}
                   onPress={() => selectAndSetDefault(selectedAddress)}
@@ -886,54 +654,23 @@ export default function AddressScreen() {
           )}
 
           {/* Add New Address Tab */}
-          {currentTab === 'search' && (
-            <View style={styles.searchContainer}>
-              <Text style={styles.sectionTitle}>Add New Address</Text>
-              <Text style={styles.sectionSubtitle}>Search for your address or enter manually</Text>
+          {currentTab === 'add' && (
+            <View style={styles.addAddressContainer}>
+              <Text style={styles.sectionTitle}>
+                {editMode ? 'Edit Address' : 'Add New Address'}
+              </Text>
+              <Text style={styles.sectionSubtitle}>
+                Detect your location or enter address manually
+              </Text>
               
-              {/* Search Section */}
-              <View style={styles.searchInputContainer}>
-                <Ionicons name="search" size={20} color="#666" style={styles.searchIcon} />
-                <TextInput
-                  style={styles.searchInput}
-                  value={searchQuery}
-                  onChangeText={setSearchQuery}
-                  placeholder="Search for an address..."
-                  placeholderTextColor="#999"
-                />
-                {searching && (
-                  <ActivityIndicator size="small" color="#007AFF" />
-                )}
+              {/* Location Display */}
+              <View style={styles.locationSection}>
+                {renderLocationDisplay()}
               </View>
-
-              {showSearchResults && searchResults.length > 0 && (
-                <View style={styles.searchResultsContainer}>
-                  <FlatList
-                    data={searchResults}
-                    renderItem={renderSearchResult}
-                    keyExtractor={(item) => item.place_id}
-                    style={styles.searchResultsList}
-                    scrollEnabled={false}
-                  />
-                </View>
-              )}
 
               {/* Manual Entry Form */}
               <View style={styles.manualFormSection}>
-                <View style={styles.sectionDivider}>
-                  <View style={styles.dividerLine} />
-                  <Text style={styles.dividerText}>Review & Edit Address Details</Text>
-                  <View style={styles.dividerLine} />
-                </View>
-
-                {manualAddress.street && (
-                  <View style={styles.populatedNotice}>
-                    <Ionicons name="information-circle" size={16} color="#007AFF" />
-                    <Text style={styles.populatedNoticeText}>
-                      Address details populated from search. Please review and edit as needed.
-                    </Text>
-                  </View>
-                )}
+                <Text style={styles.formTitle}>Address Details</Text>
 
                 <View style={styles.inputGroup}>
                   <Text style={styles.inputLabel}>Address Label</Text>
@@ -1028,9 +765,22 @@ export default function AddressScreen() {
                   </View>
                 </View>
 
+                {latitude && longitude && (
+                  <View style={styles.coordinatesInfo}>
+                    <Ionicons name="location" size={16} color="#4CAF50" />
+                    <Text style={styles.coordinatesText}>
+                      Location coordinates will be saved: {latitude.toFixed(4)}, {longitude.toFixed(4)}
+                    </Text>
+                  </View>
+                )}
+
                 <View style={styles.buttonContainer}>
                   <TouchableOpacity 
-                    style={[styles.saveButton, loading && styles.saveButtonDisabled, editMode && styles.saveButtonEditMode]} 
+                    style={[
+                      styles.saveButton, 
+                      loading && styles.saveButtonDisabled,
+                      editMode && { flex: 1 }
+                    ]} 
                     onPress={editMode ? updateAddress : saveManualAddress}
                     disabled={loading}
                   >
@@ -1055,7 +805,7 @@ export default function AddressScreen() {
                 </View>
               </View>
 
-              {savedAddresses.length >= 5 && (
+              {savedAddresses.length >= 5 && !editMode && (
                 <View style={styles.limitWarning}>
                   <Ionicons name="warning-outline" size={16} color="#FF9500" />
                   <Text style={styles.limitWarningText}>
@@ -1129,7 +879,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   locationSection: {
-    margin: 16,
+    marginBottom: 20,
   },
   locationContainer: {
     height: 200,
@@ -1162,6 +912,12 @@ const styles = StyleSheet.create({
     marginTop: 12,
     marginBottom: 8,
   },
+  locationSubtitle: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
   locationAddress: {
     fontSize: 14,
     color: '#666',
@@ -1179,8 +935,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#007AFF',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
     borderRadius: 20,
   },
   updateLocationText: {
@@ -1189,22 +945,33 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginLeft: 8,
   },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 8,
+  detectLocationButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#4CAF50',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
   },
-  sectionSubtitle: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 16,
+  detectLocationText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 8,
+  },
+  savedAddressesContainer: {
+    padding: 16,
   },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 16,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
   },
   addressCount: {
     fontSize: 12,
@@ -1213,9 +980,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,
-  },
-  savedAddressesContainer: {
-    padding: 16,
   },
   savedAddressCard: {
     backgroundColor: '#fff',
@@ -1267,6 +1031,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     lineHeight: 18,
+    marginBottom: 4,
   },
   landmarkText: {
     fontSize: 12,
@@ -1279,6 +1044,12 @@ const styles = StyleSheet.create({
     color: '#007AFF',
     marginTop: 4,
     fontWeight: '500',
+  },
+  coordsText: {
+    fontSize: 11,
+    color: '#4CAF50',
+    marginTop: 4,
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
   },
   addressActions: {
     flexDirection: 'row',
@@ -1329,78 +1100,22 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  searchContainer: {
+  addAddressContainer: {
     padding: 16,
   },
-  searchInputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    marginBottom: 16,
-  },
-  searchIcon: {
-    marginRight: 8,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 16,
-    color: '#333',
-  },
-  searchResultsContainer: {
-    marginBottom: 16,
-  },
-  searchResultsList: {
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    maxHeight: 300,
-  },
-  searchResultItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
-  searchResultText: {
-    marginLeft: 12,
-    flex: 1,
-  },
-  searchResultMain: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#333',
-  },
-  searchResultSecondary: {
+  sectionSubtitle: {
     fontSize: 14,
     color: '#666',
-    marginTop: 2,
+    marginBottom: 16,
   },
   manualFormSection: {
-    marginTop: 16,
+    marginTop: 20,
   },
-  sectionDivider: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: 20,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: '#e0e0e0',
-  },
-  dividerText: {
-    marginHorizontal: 16,
-    fontSize: 14,
-    color: '#666',
-    fontWeight: '500',
+  formTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 16,
   },
   inputGroup: {
     marginBottom: 16,
@@ -1413,7 +1128,6 @@ const styles = StyleSheet.create({
   },
   labelButtonsContainer: {
     flexDirection: 'row',
-    marginBottom: 8,
   },
   labelButton: {
     paddingHorizontal: 16,
@@ -1457,34 +1171,46 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
   },
+  coordinatesInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#E8F5E9',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#C8E6C9',
+  },
+  coordinatesText: {
+    fontSize: 12,
+    color: '#2E7D32',
+    marginLeft: 8,
+    flex: 1,
+  },
+  buttonContainer: {
+    flexDirection: 'row',
+    marginTop: 20,
+  },
   saveButton: {
     backgroundColor: '#007AFF',
     padding: 16,
     borderRadius: 8,
     alignItems: 'center',
-    marginTop: 16,
+    flex: 1,
   },
   saveButtonDisabled: {
     backgroundColor: '#ccc',
-  },
-  saveButtonEditMode: {
-    flex: 1,
   },
   saveButtonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
   },
-  buttonContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
   cancelButton: {
     backgroundColor: '#f0f0f0',
     padding: 16,
     borderRadius: 8,
     alignItems: 'center',
-    marginTop: 16,
     marginLeft: 12,
     flex: 1,
   },
@@ -1506,23 +1232,6 @@ const styles = StyleSheet.create({
   limitWarningText: {
     fontSize: 14,
     color: '#856404',
-    marginLeft: 8,
-    flex: 1,
-    lineHeight: 18,
-  },
-  populatedNotice: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#E3F2FD',
-    padding: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#BBDEFB',
-    marginBottom: 16,
-  },
-  populatedNoticeText: {
-    fontSize: 14,
-    color: '#1976D2',
     marginLeft: 8,
     flex: 1,
     lineHeight: 18,

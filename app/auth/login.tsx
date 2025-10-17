@@ -31,16 +31,20 @@ export default function LoginScreen() {
   const [googleLoading, setGoogleLoading] = useState(false);
   const { login, googleLogin } = useAuth();
 
+
+  useEffect(() => {
+    console.log('📱 Login screen mounted');
+  }, []);
+  
   useEffect(() => {
     // Configure Google Sign-In
     GoogleSignin.configure({
       webClientId: GOOGLE_WEB_CLIENT_ID,
       iosClientId: GOOGLE_IOS_CLIENT_ID,
       offlineAccess: true,
-      hostedDomain: '', // specify a domain to restrict sign-ups to
-      // loginHint: '', // [iOS] The user's ID, or email address, to be prefilled in the authentication UI
-      forceCodeForRefreshToken: true, // [Android] related to `serverAuthCode`, read the docs link below *.
-      accountName: '', // [Android] specifies an account name on the device that should be used
+      hostedDomain: '',
+      forceCodeForRefreshToken: true,
+      accountName: '',
     });
   }, []);
 
@@ -60,85 +64,158 @@ export default function LoginScreen() {
 
       // Sign in with Google
       const userInfo = await GoogleSignin.signIn();
-      // console.log('✅ Google Sign-In successful:', {
-      //   id: userInfo.user.id, // Access user directly from userInfo, as userInfo.data can be null
-      //   email: userInfo.user.email,
-      //   name: userInfo.user.name,
-      // });
+      console.log('✅ Google Sign-In successful, userInfo structure:', JSON.stringify(userInfo, null, 2));
 
       // Get tokens
       const tokens = await GoogleSignin.getTokens();
       console.log('✅ Got Google tokens');
 
+      // ✅ FIXED: Handle different userInfo structures
+      let email, name, googleId;
+      
+      if (userInfo.data) {
+        email = userInfo.data.user?.email;
+        name = userInfo.data.user?.name;
+        googleId = userInfo.data.user?.id;
+      }
+
+      console.log('📧 Extracted user data:', { email, name, googleId });
+
+      if (!email || !name) {
+        throw new Error('Missing required user information from Google');
+      }
+
       // Prepare user data for backend
       const googleUserData = {
-          email: userInfo.user.email,
-          name: userInfo.user.name,
-          googleId: userInfo.user.id,
+        email: email,
+        name: name,
+        googleId: googleId,
       };
 
       console.log('📤 Sending Google login data to backend...');
       
       // Send to backend
-      const result = await googleLogin(tokens.idToken,googleUserData);
+      const result = await googleLogin(tokens.idToken, googleUserData);
       console.log('✅ Backend response:', result);
 
+      // if (result.success) {
+      //   console.log('🎉 Google login successful!');
+        
+      //   if (result.requires_phone) {
+      //     console.log('📱 Phone number required, redirecting...');
+      //     router.replace('/auth/phone');
+      //   } else {
+      //     console.log('🏠 Redirecting to home...');
+      //     router.replace('/(tabs)');
+      //   }
+      // } else {
+      //   console.error('❌ Google login failed:', result.error);
+      //   Alert.alert(
+      //     'Google Login Failed',
+      //     result.error || 'Unable to sign in with Google. Please try again.'
+      //   );
+      // }
       if (result.success) {
         console.log('🎉 Google login successful!');
+        console.log('📱 requires_phone:', result.requires_phone);
         
         if (result.requires_phone) {
           console.log('📱 Phone number required, redirecting...');
-          router.replace('/auth/phone');
+          setTimeout(() => {
+            router.replace('/auth/phone');
+          }, 500);
         } else {
           console.log('🏠 Redirecting to home...');
-          router.replace('/(tabs)');
+          setTimeout(() => {
+            router.replace('/(tabs)');
+          }, 500);
         }
-      } else {
-        console.error('❌ Google login failed:', result.error);
-        Alert.alert(
-          'Google Login Failed',
-          result.error || 'Unable to sign in with Google. Please try again.'
-        );
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('❌ Google Sign-In error:', error);
+      console.error('Error details:', JSON.stringify(error, null, 2));
       
-      if (error && typeof error === 'object' && 'code' in error && error.code === statusCodes.SIGN_IN_CANCELLED) {
+      if (error.code === statusCodes.SIGN_IN_CANCELLED) {
         console.log('ℹ️ User cancelled Google login');
         // User cancelled - no need to show error
-      } else if (error && typeof error === 'object' && 'code' in error && error.code === statusCodes.IN_PROGRESS) {
+      } else if (error.code === statusCodes.IN_PROGRESS) {
         console.log('ℹ️ Google sign-in already in progress');
         Alert.alert('Please Wait', 'Google sign-in is already in progress');
-      } else if (error && typeof error === 'object' && 'code' in error && error.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
+      } else if (error.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
         Alert.alert('Error', 'Google Play Services not available or outdated');
       } else {
         console.log('❌ Unknown Google Sign-In error:', error);
-        Alert.alert('Error', 'Google Sign-In failed. Please try again.');
+        Alert.alert('Error', error.message || 'Google Sign-In failed. Please try again.');
       }
     } finally {
       setGoogleLoading(false);
     }
   };
 
+  // const handleLogin = async () => {
+  //   if (!emailOrPhone || !password) {
+  //     Alert.alert('Error', 'Please fill in all fields');
+  //     return;
+  //   }
+
+  //   setLoading(true);
+  //   try {
+  //     console.log('📧 Starting regular login...');
+  //     const result = await login(emailOrPhone, password);
+
+  //     if (result.success) {
+  //       console.log('✅ Regular login successful!');
+  //       if (result.requires_phone) {
+  //         console.log('📱 Phone number required, redirecting...');
+  //         router.replace('/auth/phone');
+  //       } else {
+  //         console.log('🏠 Redirecting to home...');
+  //         router.replace('/(tabs)');
+  //       }
+  //     } else {
+  //       console.error('❌ Regular login failed:', result.error);
+  //       Alert.alert(
+  //         'Login Failed',
+  //         result.error || 'Invalid credentials. Please try again.'
+  //       );
+  //     }
+  //   } catch (error) {
+  //     console.error('❌ Login error:', error);
+  //     Alert.alert(
+  //       'Error',
+  //       'Network error. Please check your connection and try again.'
+  //     );
+  //   } finally {
+  //     setLoading(false);
+  //   }
+  // };
+
   const handleLogin = async () => {
     if (!emailOrPhone || !password) {
       Alert.alert('Error', 'Please fill in all fields');
       return;
     }
-
+  
     setLoading(true);
     try {
       console.log('📧 Starting regular login...');
       const result = await login(emailOrPhone, password);
-
+  
       if (result.success) {
         console.log('✅ Regular login successful!');
+        console.log('📱 requires_phone:', result.requires_phone);
+        
+        // ✅ Don't navigate immediately, let the login response determine it
         if (result.requires_phone) {
-          console.log('📱 Phone number required, redirecting...');
-          router.replace('/auth/phone');
+          console.log('📱 Phone number required, redirecting to phone screen...');
+          setTimeout(() => {
+            router.replace('/auth/phone');
+          }, 500);
         } else {
           console.log('🏠 Redirecting to home...');
-          router.replace('/(tabs)');
+          setTimeout(() => {
+            router.replace('/(tabs)');
+          }, 500);
         }
       } else {
         console.error('❌ Regular login failed:', result.error);
@@ -205,6 +282,7 @@ export default function LoginScreen() {
               secureTextEntry
               returnKeyType="done"
               editable={!loading && !googleLoading}
+              onSubmitEditing={handleLogin}
             />
 
             <TouchableOpacity

@@ -9,18 +9,25 @@ import {
   Linking,
   Alert,
   RefreshControl,
+  Modal,
+  Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useOrderTracking } from '../contexts/OrderTrackingContext';
 import { useAuth } from '../contexts/AuthContext';
+import { authenticatedFetch } from '../utils/authenticatedFetch';
+import { createApiUrl } from '../config/apiConfig';
 
 export default function OrderTrackingScreen() {
   const { activeOrder, loading, refreshActiveOrder } = useOrderTracking();
   const { token } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
   const [selectedTip, setSelectedTip] = useState<number | null>(null);
+  const [partnerRating, setPartnerRating] = useState(0);
+  const [submittingRating, setSubmittingRating] = useState(false);
+  const [showOrderItemsModal, setShowOrderItemsModal] = useState(false);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -33,6 +40,39 @@ export default function OrderTrackingScreen() {
       Linking.openURL(`tel:${activeOrder.delivery_partner.phone}`);
     } else {
       Alert.alert('Info', 'Delivery partner contact not available yet');
+    }
+  };
+
+  const handleSubmitPartnerRating = async (rating: number) => {
+    if (!activeOrder?.delivery_partner || submittingRating) return;
+
+    setPartnerRating(rating);
+    setSubmittingRating(true);
+
+    try {
+      const response = await authenticatedFetch(
+        createApiUrl(`orders/${activeOrder.id}/rate-partner`),
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            partner_rating: rating,
+            order_id: activeOrder.id,
+          }),
+        }
+      );
+
+      if (response.ok) {
+        Alert.alert('Thank you!', 'Your rating for the delivery partner has been submitted.');
+      } else {
+        Alert.alert('Error', 'Failed to submit rating. Please try again.');
+        setPartnerRating(0);
+      }
+    } catch (error) {
+      console.error('Error rating partner:', error);
+      Alert.alert('Error', 'Failed to submit rating. Please try again.');
+      setPartnerRating(0);
+    } finally {
+      setSubmittingRating(false);
     }
   };
 
@@ -57,6 +97,106 @@ export default function OrderTrackingScreen() {
     }
   };
 
+  const showDeliveryPartner = activeOrder && 
+    activeOrder.delivery_partner && 
+    ['assigned', 'out_for_delivery', 'delivered'].includes(activeOrder.order_status);
+
+  // Render order items modal
+  const renderOrderItemsModal = () => (
+    <Modal
+      animationType="slide"
+      transparent={true}
+      visible={showOrderItemsModal}
+      onRequestClose={() => setShowOrderItemsModal(false)}
+    >
+      <View style={styles.modalOverlay}>
+        <Pressable 
+          style={styles.modalBackdrop} 
+          onPress={() => setShowOrderItemsModal(false)}
+        />
+        <View style={styles.modalContent}>
+          {/* Modal Header */}
+          <View style={styles.modalHeader}>
+            <View style={styles.modalHandle} />
+            <View style={styles.modalTitleContainer}>
+              <Text style={styles.modalTitle}>Order Items</Text>
+              <TouchableOpacity
+                onPress={() => setShowOrderItemsModal(false)}
+                style={styles.modalCloseButton}
+              >
+                <Ionicons name="close" size={24} color="#666" />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* Order Items List */}
+          <ScrollView style={styles.modalItemsList} showsVerticalScrollIndicator={false}>
+            <View style={styles.itemsContainer}>
+              {activeOrder?.items?.map((item: any, index: number) => (
+                <View key={index} style={styles.orderItem}>
+                  <View style={styles.itemHeader}>
+                    <View style={styles.vegIconSmall}>
+                      <View style={styles.vegDotSmall} />
+                    </View>
+                    <Text style={styles.itemName}>{item.product}</Text>
+                  </View>
+                  <View style={styles.itemDetails}>
+                    <Text style={styles.itemQuantity}>Qty: {item.quantity}</Text>
+                    <Text style={styles.itemPrice}>₹{(item.price * item.quantity).toFixed(2)}</Text>
+                  </View>
+                  {item.variant && (
+                    <Text style={styles.itemVariant}>{item.variant}</Text>
+                  )}
+                </View>
+              ))}
+            </View>
+
+            {/* Price Breakdown */}
+            <View style={styles.priceBreakdown}>
+              <View style={styles.priceRow}>
+                <Text style={styles.priceLabel}>Item Total</Text>
+                <Text style={styles.priceValue}>₹{activeOrder?.subtotal?.toFixed(2) || '0.00'}</Text>
+              </View>
+              
+              {(activeOrder?.delivery_charge ?? 0) > 0 && (
+                <View style={styles.priceRow}>
+                  <Text style={styles.priceLabel}>Delivery Charge</Text>
+                  <Text style={styles.priceValue}>₹{activeOrder?.delivery_charge?.toFixed(2)}</Text>
+                </View>
+              )}
+              
+              {(activeOrder?.tax ?? 0) > 0 && (
+                <View style={styles.priceRow}>
+                  <Text style={styles.priceLabel}>Taxes & Fees</Text>
+                  <Text style={styles.priceValue}>₹{activeOrder?.tax?.toFixed(2)}</Text>
+                </View>
+              )}
+              
+              {(activeOrder?.app_fee ?? 0) > 0 && (
+                <View style={styles.priceRow}>
+                  <Text style={styles.priceLabel}>Platform Fee</Text>
+                  <Text style={styles.priceValue}>₹{activeOrder?.app_fee?.toFixed(2)}</Text>
+                </View>
+              )}
+              
+              {(activeOrder?.promo_discount ?? 0) > 0 && (
+                <View style={[styles.priceRow, styles.discountRow]}>
+                  <Text style={styles.discountLabel}>Discount</Text>
+                  <Text style={styles.discountValue}>-₹{activeOrder?.promo_discount?.toFixed(2)}</Text>
+                </View>
+              )}
+              
+              <View style={styles.totalRow}>
+                <Text style={styles.totalLabel}>Total Amount</Text>
+                <Text style={styles.totalValue}>₹{activeOrder?.total_amount?.toFixed(2) || '0.00'}</Text>
+              </View>
+            </View>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+
   if (loading && !activeOrder) {
     return (
       <SafeAreaView style={styles.container}>
@@ -73,12 +213,8 @@ export default function OrderTrackingScreen() {
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-            <Ionicons name="chevron-down" size={28} color="#fff" />
+            <Ionicons name="chevron-down" size={28} color="#333" />
           </TouchableOpacity>
-          {/* <Text style={styles.headerTitle}>{activeOrder?.restaurant_name || 'Restaurant'}</Text> */}
-          {/* <TouchableOpacity style={styles.shareButton}>
-            <Ionicons name="share-outline" size={24} color="#fff" />
-          </TouchableOpacity> */}
         </View>
         <View style={styles.emptyContainer}>
           <Ionicons name="cube-outline" size={64} color="#ccc" />
@@ -106,10 +242,8 @@ export default function OrderTrackingScreen() {
             <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
               <Ionicons name="chevron-down" size={28} color="#fff" />
             </TouchableOpacity>
-            {/* <Text style={styles.headerTitle}>{activeOrder.restaurant_name || 'Restaurant'}</Text>
-            <TouchableOpacity style={styles.shareButton}>
-              <Ionicons name="share-outline" size={24} color="#fff" />
-            </TouchableOpacity> */}
+            {/* <Text style={styles.headerTitle}>{activeOrder.restaurant_name || 'Restaurant'}</Text> */}
+            <View style={{ width: 32 }} />
           </View>
 
           {/* Status Section */}
@@ -134,19 +268,6 @@ export default function OrderTrackingScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
-        {/* Promotional Banner Carousel */}
-        {/* <View style={styles.bannerContainer}>
-          <View style={styles.banner}>
-            <Text style={styles.bannerText}>Apply now ▸</Text>
-          </View>
-          <View style={styles.carouselDots}>
-            <View style={[styles.dot, styles.activeDot]} />
-            <View style={styles.dot} />
-            <View style={styles.dot} />
-            <View style={styles.dot} />
-          </View>
-        </View> */}
-
         {/* Tip Section - Show when assigning */}
         {activeOrder.order_status === 'assigning' && (
           <View style={styles.tipSection}>
@@ -162,30 +283,17 @@ export default function OrderTrackingScreen() {
               Make their day by leaving a tip. 100% of the amount will go to them after delivery
             </Text>
             <View style={styles.tipOptions}>
-              <TouchableOpacity
-                style={[styles.tipButton, selectedTip === 20 && styles.tipButtonSelected]}
-                onPress={() => setSelectedTip(20)}
-              >
-                <Text style={[styles.tipButtonText, selectedTip === 20 && styles.tipButtonTextSelected]}>
-                  ₹20
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.tipButton, selectedTip === 30 && styles.tipButtonSelected]}
-                onPress={() => setSelectedTip(30)}
-              >
-                <Text style={[styles.tipButtonText, selectedTip === 30 && styles.tipButtonTextSelected]}>
-                  ₹30
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.tipButton, selectedTip === 50 && styles.tipButtonSelected]}
-                onPress={() => setSelectedTip(50)}
-              >
-                <Text style={[styles.tipButtonText, selectedTip === 50 && styles.tipButtonTextSelected]}>
-                  ₹50
-                </Text>
-              </TouchableOpacity>
+              {[20, 30, 50].map((amount) => (
+                <TouchableOpacity
+                  key={amount}
+                  style={[styles.tipButton, selectedTip === amount && styles.tipButtonSelected]}
+                  onPress={() => setSelectedTip(amount)}
+                >
+                  <Text style={[styles.tipButtonText, selectedTip === amount && styles.tipButtonTextSelected]}>
+                    ₹{amount}
+                  </Text>
+                </TouchableOpacity>
+              ))}
               <TouchableOpacity
                 style={[styles.tipButton, selectedTip === 0 && styles.tipButtonSelected]}
                 onPress={() => setSelectedTip(0)}
@@ -195,11 +303,43 @@ export default function OrderTrackingScreen() {
                 </Text>
               </TouchableOpacity>
             </View>
-            <TouchableOpacity style={styles.safetyLink}>
-              <Ionicons name="shield-checkmark-outline" size={20} color="#666" />
-              <Text style={styles.safetyLinkText}>Learn about delivery partner safety</Text>
-              <Ionicons name="chevron-forward" size={20} color="#666" />
-            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Delivery Partner Section - Only show when partner is assigned */}
+        {showDeliveryPartner && (
+          <View style={styles.deliveryPartnerSection}>
+            <View style={styles.partnerHeader}>
+              <View style={styles.partnerAvatar}>
+                <Ionicons name="person" size={28} color="#fff" />
+              </View>
+              <View style={styles.partnerInfo}>
+                <Text style={styles.partnerLabel}>Your Delivery Partner</Text>
+                <Text style={styles.partnerName}>
+                  {activeOrder.delivery_partner.name || 'Delivery Partner'}
+                </Text>
+                {activeOrder.delivery_partner.rating && (
+                  <View style={styles.partnerRatingContainer}>
+                    <Ionicons name="star" size={14} color="#FFD700" />
+                    <Text style={styles.partnerRatingText}>
+                      {activeOrder.delivery_partner.rating.toFixed(1)}
+                    </Text>
+                    {activeOrder.delivery_partner.deliveries > 0 && (
+                      <Text style={styles.deliveriesText}>
+                        • {activeOrder.delivery_partner.deliveries} deliveries
+                      </Text>
+                    )}
+                  </View>
+                )}
+              </View>
+              <TouchableOpacity
+                style={styles.callPartnerButton}
+                onPress={handleCallDeliveryPartner}
+              >
+                <Ionicons name="call" size={20} color="#fff" />
+                <Text style={styles.callButtonText}>Call</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         )}
 
@@ -216,63 +356,35 @@ export default function OrderTrackingScreen() {
             <Ionicons name="call-outline" size={24} color="#666" />
             <View style={styles.detailTextContainer}>
               <Text style={styles.detailTitle}>
-                {activeOrder.delivery_address?.phone || 'Phone Number'}
+                {activeOrder.delivery_address?.phone || activeOrder.delivery_address?.phone || 'Phone Number'}
               </Text>
               <Text style={styles.detailSubtitle}>Delivery partner may call this number</Text>
             </View>
-            {/* <TouchableOpacity>
-              <Text style={styles.editButton}>Edit</Text>
-            </TouchableOpacity> */}
           </View>
 
           {/* Delivery Address */}
           <View style={styles.detailRow}>
             <Ionicons name="home-outline" size={24} color="#666" />
             <View style={styles.detailTextContainer}>
-              {/* <Text style={styles.detailTitle}>
-                {activeOrder.delivery_address?.label || 'Delivery at Home'}
-              </Text> */}
+              <Text style={styles.detailTitle}>
+                {activeOrder.delivery_address?.label || 'Delivery Address'}
+              </Text>
               <Text style={styles.detailSubtitle} numberOfLines={2}>
-                {activeOrder.delivery_address?.address || 'Address not available'}
+                {activeOrder.delivery_address?.street || activeOrder.delivery_address?.address || 'Address not available'}
+                {activeOrder.delivery_address?.city && `, ${activeOrder.delivery_address.city}`}
+                {activeOrder.delivery_address?.pincode && ` - ${activeOrder.delivery_address.pincode}`}
               </Text>
             </View>
-            {/* <TouchableOpacity>
-              <Text style={styles.editButton}>Edit</Text>
-            </TouchableOpacity> */}
           </View>
-
-          {/* Delivery Instructions */}
-          {/* <TouchableOpacity style={styles.instructionsRow}>
-            <Ionicons name="bicycle-outline" size={24} color="#666" />
-            <Text style={styles.instructionsText}>Add delivery instructions</Text>
-            <Ionicons name="chevron-forward" size={20} color="#ccc" />
-          </TouchableOpacity> */}
         </View>
 
-        {/* Restaurant Card */}
+        {/* Order Details Card - Tappable to show full items */}
         <View style={styles.restaurantCard}>
-          <View style={styles.restaurantHeader}>
-            {/* <View style={styles.restaurantAvatar}>
-              <Ionicons name="restaurant" size={28} color="#fff" />
-            </View> */}
-            {/* <View style={styles.restaurantInfo}>
-              <Text style={styles.restaurantName}>{activeOrder.restaurant_name}</Text>
-              <Text style={styles.restaurantLocation}>
-                {activeOrder.restaurant?.location || 'Location'}
-              </Text>
-            </View> */}
-            {activeOrder.delivery_partner && (
-              <TouchableOpacity
-                style={styles.callButton}
-                onPress={handleCallDeliveryPartner}
-              >
-                <Ionicons name="call" size={24} color="#00A65A" />
-              </TouchableOpacity>
-            )}
-          </View>
-
-          {/* Order Details */}
-          <TouchableOpacity style={styles.orderDetailsRow}>
+          <TouchableOpacity 
+            style={styles.orderDetailsRow}
+            onPress={() => setShowOrderItemsModal(true)}
+            activeOpacity={0.7}
+          >
             <Ionicons name="receipt-outline" size={24} color="#666" />
             <View style={styles.orderDetailsText}>
               <Text style={styles.orderNumber}>Order #{activeOrder.id}</Text>
@@ -281,34 +393,58 @@ export default function OrderTrackingScreen() {
                   <View style={styles.vegDot} />
                 </View>
                 <Text style={styles.orderItemsText} numberOfLines={1}>
-                  {activeOrder.items?.length || 0} x items
+                  {activeOrder.items?.length || 0} items • ₹{activeOrder.total_amount?.toFixed(2) || '0.00'}
                 </Text>
               </View>
             </View>
             <Ionicons name="chevron-forward" size={20} color="#ccc" />
           </TouchableOpacity>
-
-          {/* Add cooking requests */}
-          {/* <TouchableOpacity style={styles.optionRow}>
-            <Ionicons name="chatbox-outline" size={24} color="#ccc" />
-            <Text style={styles.optionTextDisabled}>Add cooking requests</Text>
-          </TouchableOpacity> */}
-
-          {/* Add more items */}
-          {/* <TouchableOpacity style={styles.optionRow}>
-            <Ionicons name="add-circle-outline" size={24} color="#666" />
-            <View style={styles.optionTextContainer}>
-              <Text style={styles.optionText}>Add more items</Text>
-              <Text style={styles.optionSubtext}>Get free delivery on additional items</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color="#ccc" />
-          </TouchableOpacity> */}
         </View>
+
+        {/* Rate Delivery Partner - Show only when delivered */}
+        {activeOrder.order_status === 'delivered' && showDeliveryPartner && (
+          <View style={styles.ratePartnerSection}>
+            <View style={styles.ratePartnerHeader}>
+              <View style={styles.partnerAvatarSmall}>
+                <Ionicons name="person" size={20} color="#fff" />
+              </View>
+              <View style={styles.ratePartnerTextContainer}>
+                <Text style={styles.ratePartnerTitle}>
+                  {activeOrder.delivery_partner.name || 'Delivery Partner'}
+                </Text>
+                <Text style={styles.ratePartnerSubtitle}>How was your delivery experience?</Text>
+              </View>
+            </View>
+            <View style={styles.partnerStarsContainer}>
+              {[1, 2, 3, 4, 5].map((star) => (
+                <TouchableOpacity
+                  key={star}
+                  onPress={() => !submittingRating && handleSubmitPartnerRating(star)}
+                  disabled={submittingRating}
+                  hitSlop={{ top: 10, bottom: 10, left: 5, right: 5 }}
+                >
+                  <Ionicons
+                    name={partnerRating >= star ? 'star' : 'star-outline'}
+                    size={32}
+                    color={submittingRating ? '#ccc' : '#FFB800'}
+                    style={styles.partnerStar}
+                  />
+                </TouchableOpacity>
+              ))}
+            </View>
+            {partnerRating > 0 && (
+              <Text style={styles.ratingThankYou}>
+                Thank you for rating your delivery partner!
+              </Text>
+            )}
+          </View>
+        )}
 
         {/* Help Section */}
         <View style={styles.helpSection}>
-          <TouchableOpacity style={styles.helpRow}
-          onPress={() => router.push('/help-support')}
+          <TouchableOpacity 
+            style={styles.helpRow}
+            onPress={() => router.push('/help-support')}
           >
             <View style={styles.helpIconContainer}>
               <Ionicons name="headset-outline" size={28} color="#E74C3C" />
@@ -319,30 +455,13 @@ export default function OrderTrackingScreen() {
             </View>
             <Ionicons name="chevron-forward" size={20} color="#ccc" />
           </TouchableOpacity>
-
-          {/* <TouchableOpacity style={styles.cancelRow}>
-            <Ionicons name="close-circle-outline" size={24} color="#666" />
-            <Text style={styles.cancelText}>Cancel order</Text>
-            <Ionicons name="chevron-forward" size={20} color="#ccc" />
-          </TouchableOpacity> */}
         </View>
-
-        {/* Notifications Section */}
-        {/* <View style={styles.notificationsSection}>
-          <TouchableOpacity style={styles.notificationRow}>
-            <View style={styles.notificationIconContainer}>
-              <Ionicons name="notifications-outline" size={28} color="#FF9500" />
-            </View>
-            <View style={styles.notificationTextContainer}>
-              <Text style={styles.notificationTitle}>Get live order updates</Text>
-              <Text style={styles.notificationSubtitle}>Enable notifications to get updates</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color="#ccc" />
-          </TouchableOpacity>
-        </View> */}
 
         <View style={{ height: 120 }} />
       </ScrollView>
+
+      {/* Order Items Modal */}
+      {renderOrderItemsModal()}
     </View>
   );
 }
@@ -372,9 +491,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     flex: 1,
     textAlign: 'center',
-  },
-  shareButton: {
-    padding: 4,
   },
   statusSection: {
     alignItems: 'center',
@@ -446,33 +562,6 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
   },
-  bannerContainer: {
-    backgroundColor: '#fff',
-    marginTop: 8,
-    paddingVertical: 12,
-  },
-  banner: {
-    paddingHorizontal: 16,
-  },
-  bannerText: {
-    fontSize: 14,
-    color: '#666',
-  },
-  carouselDots: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    marginTop: 8,
-    gap: 6,
-  },
-  dot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#D0D0D0',
-  },
-  activeDot: {
-    backgroundColor: '#00A65A',
-  },
   tipSection: {
     backgroundColor: '#fff',
     marginTop: 8,
@@ -523,16 +612,70 @@ const styles = StyleSheet.create({
   tipButtonTextSelected: {
     color: '#fff',
   },
-  safetyLink: {
+  deliveryPartnerSection: {
+    backgroundColor: '#fff',
+    marginTop: 8,
+    padding: 16,
+  },
+  partnerHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
   },
-  safetyLinkText: {
+  partnerAvatar: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#007AFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  partnerInfo: {
     flex: 1,
+  },
+  partnerLabel: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 2,
+  },
+  partnerName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  partnerRatingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  partnerRatingText: {
     fontSize: 14,
     color: '#666',
-    marginLeft: 12,
+    marginLeft: 4,
+  },
+  deliveriesText: {
+    fontSize: 12,
+    color: '#999',
+    marginLeft: 4,
+  },
+  callPartnerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#34C759',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+    shadowColor: '#34C759',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  callButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 6,
   },
   deliveryDetailsCard: {
     backgroundColor: '#FFF9E6',
@@ -569,73 +712,15 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#666',
   },
-  editButton: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#00A65A',
-  },
-  instructionsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    padding: 16,
-    borderRadius: 8,
-  },
-  instructionsText: {
-    flex: 1,
-    fontSize: 16,
-    color: '#666',
-    marginLeft: 12,
-  },
   restaurantCard: {
     backgroundColor: '#fff',
     marginTop: 8,
     padding: 16,
   },
-  restaurantHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
-  },
-  restaurantAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#FF6B35',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  restaurantInfo: {
-    flex: 1,
-  },
-  restaurantName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 4,
-  },
-  restaurantLocation: {
-    fontSize: 13,
-    color: '#666',
-  },
-  callButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#E8F8F0',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
   orderDetailsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
   },
   orderDetailsText: {
     flex: 1,
@@ -671,32 +756,53 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#666',
   },
-  optionRow: {
+  ratePartnerSection: {
+    backgroundColor: '#fff',
+    marginTop: 8,
+    padding: 16,
+  },
+  ratePartnerHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
+    marginBottom: 16,
   },
-  optionTextDisabled: {
+  partnerAvatarSmall: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#007AFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  ratePartnerTextContainer: {
     flex: 1,
-    fontSize: 14,
-    color: '#ccc',
-    marginLeft: 12,
   },
-  optionTextContainer: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  optionText: {
+  ratePartnerTitle: {
     fontSize: 16,
-    fontWeight: '500',
+    fontWeight: '600',
     color: '#333',
-    marginBottom: 4,
+    marginBottom: 2,
   },
-  optionSubtext: {
+  ratePartnerSubtitle: {
     fontSize: 13,
     color: '#666',
+  },
+  partnerStarsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  partnerStar: {
+    marginHorizontal: 4,
+  },
+  ratingThankYou: {
+    fontSize: 14,
+    color: '#4CAF50',
+    textAlign: 'center',
+    marginTop: 8,
+    fontWeight: '500',
   },
   helpSection: {
     backgroundColor: '#fff',
@@ -707,7 +813,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 12,
-    marginBottom: 8,
   },
   helpIconContainer: {
     width: 48,
@@ -731,49 +836,167 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#666',
   },
-  cancelRow: {
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  modalBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '80%',
+    paddingBottom: 20,
+  },
+  modalHeader: {
+    paddingTop: 8,
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  modalHandle: {
+    width: 40,
+    height: 4,
+    backgroundColor: '#ccc',
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginBottom: 12,
+  },
+  modalTitleContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingTop: 16,
-    paddingVertical: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#F0F0F0',
+    justifyContent: 'space-between',
   },
-  cancelText: {
-    flex: 1,
-    fontSize: 16,
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
     color: '#333',
-    marginLeft: 12,
   },
-  notificationsSection: {
-    backgroundColor: '#fff',
-    marginTop: 8,
+  modalCloseButton: {
+    padding: 4,
+  },
+  modalItemsList: {
+    flex: 1,
+  },
+  itemsContainer: {
     padding: 16,
   },
-  notificationRow: {
+  orderItem: {
+    backgroundColor: '#f9f9f9',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  itemHeader: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginBottom: 8,
   },
-  notificationIconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#FFF4E6',
+  vegIconSmall: {
+    width: 14,
+    height: 14,
+    borderWidth: 1.5,
+    borderColor: '#00A65A',
+    borderRadius: 2,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: 8,
   },
-  notificationTextContainer: {
-    flex: 1,
+  vegDotSmall: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#00A65A',
   },
-  notificationTitle: {
+  itemName: {
     fontSize: 16,
     fontWeight: '600',
     color: '#333',
-    marginBottom: 4,
+    flex: 1,
   },
-  notificationSubtitle: {
-    fontSize: 13,
+  itemDetails: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  itemQuantity: {
+    fontSize: 14,
     color: '#666',
+  },
+  itemPrice: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#007AFF',
+  },
+  itemVariant: {
+    fontSize: 12,
+    color: '#999',
+    marginTop: 4,
+    fontStyle: 'italic',
+  },
+  priceBreakdown: {
+    backgroundColor: '#fff',
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  priceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+  },
+  priceLabel: {
+    fontSize: 14,
+    color: '#666',
+  },
+  priceValue: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  discountRow: {
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+    marginTop: 4,
+    paddingTop: 12,
+  },
+  discountLabel: {
+    fontSize: 14,
+    color: '#4CAF50',
+    fontWeight: '500',
+  },
+  discountValue: {
+    fontSize: 14,
+    color: '#4CAF50',
+    fontWeight: '600',
+  },
+  totalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingTop: 12,
+    marginTop: 8,
+    borderTopWidth: 2,
+    borderTopColor: '#007AFF',
+  },
+  totalLabel: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#333',
+  },
+  totalValue: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#007AFF',
   },
 });

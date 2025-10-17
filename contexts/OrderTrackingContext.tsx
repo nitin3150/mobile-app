@@ -1,18 +1,6 @@
-import { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode} from 'react';
-import { useAuth } from './AuthContext';
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { API_BASE_URL } from '../config/apiConfig';
-
-// interface Order {
-//   id: string;
-//   // restaurant_name: string;
-//   order_status: string;
-//   estimated_delivery_time?: number;
-//   delivery_partner?: any;
-//   items?: any[];
-//   total_amount?: number;
-//   delivery_address?: any;
-//   // ... other order fields
-// }
+import { useAuth } from './AuthContext';
 
 interface DeliveryPartner {
   name: string;
@@ -22,53 +10,53 @@ interface DeliveryPartner {
 }
 
 interface Order {
-  _id: string;
-  id?: string;  
-  order_status: 'preparing' | 'assigning' | 'assigned' | 'out_for_delivery' | 'delivered' | 'arrived';
-  delivery_partner?: DeliveryPartner;
-  estimated_delivery?: string;
-  actual_delivery?: string;
-  delivery_partner_location?: {
-    latitude: number;
-    longitude: number;
-  };
-  status_message?: string;
-  timeline?: Array<{
-    status: string;
-    timestamp: string;
-    message?: string;
-  }>;
+    _id: string;
+    id?: string;  
+    order_status: 'preparing' | 'assigning' | 'assigned' | 'out_for_delivery' | 'delivered' | 'arrived';
+    delivery_partner?: DeliveryPartner;
+    estimated_delivery?: string;
+    actual_delivery?: string;
+    delivery_partner_location?: {
+      latitude: number;
+      longitude: number;
+    };
+    status_message?: string;
+    timeline?: Array<{
+      status: string;
+      timestamp: string;
+      message?: string;
+    }>;
 
-  items?: Array<{
-    product_name?: string;
-    product?: string;
-    quantity: number;
-    price: number;
-  }>;
-  subtotal?: number;
-  tax?: number;
-  delivery_charge?: number;
-  app_fee?: number;
-  promo_discount?: number;
-  total_amount?: number;
-  delivery_address?: {
-    address: string;
-    city: string;
-    state: string;
-    pincode: string;
-    phone: string;
-  };
-  status_change_history?: Array<{
-    status: string;
-    changed_at: string;
-  }>;
-  delivered_at?: string;
-  arrived_at?: string;
-  out_for_delivery_at?: string;
-  assigned_at?: string;
-  preparing_at?: string;
-  confirmed_at?: string;
-  created_at?: string;
+    items?: Array<{
+      product_name?: string;
+      product?: string;
+      quantity: number;
+      price: number;
+    }>;
+    subtotal?: number;
+    tax?: number;
+    delivery_charge?: number;
+    app_fee?: number;
+    promo_discount?: number;
+    total_amount?: number;
+    delivery_address?: {
+      address: string;
+      city: string;
+      state: string;
+      pincode: string;
+      phone: string;
+    };
+    status_change_history?: Array<{
+      status: string;
+      changed_at: string;
+    }>;
+    delivered_at?: string;
+    arrived_at?: string;
+    out_for_delivery_at?: string;
+    assigned_at?: string;
+    preparing_at?: string;
+    confirmed_at?: string;
+    created_at?: string;
 }
 
 interface OrderTrackingContextType {
@@ -82,66 +70,111 @@ interface OrderTrackingContextType {
 
 const OrderTrackingContext = createContext<OrderTrackingContextType | undefined>(undefined);
 
-interface OrderTrackingProviderProps {
-  children: React.ReactNode;
+export function useOrderTracking() {
+  const context = useContext(OrderTrackingContext);
+  if (!context) {
+    throw new Error('useOrderTracking must be used within OrderTrackingProvider');
+  }
+  return context;
 }
 
 export function OrderTrackingProvider({ children }: { children: ReactNode }) {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const [activeOrder, setActiveOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPollingEnabled, setIsPollingEnabled] = useState(true);
   const [dismissedOrderId, setDismissedOrderId] = useState<string | null>(null);
 
+  // ✅ Add logging to see when context initializes
+  useEffect(() => {
+    console.log('🎯 OrderTrackingProvider mounted');
+    return () => {
+      console.log('🎯 OrderTrackingProvider unmounted');
+    };
+  }, []);
+
+  // ✅ Log when auth state changes
+  useEffect(() => {
+    console.log('🎯 Auth state in OrderTracking:', {
+      hasToken: !!token,
+      hasUser: !!user,
+      userId: user?.id,
+      userEmail: user?.email,
+    });
+  }, [token, user]);
+
   const fetchActiveOrder = async () => {
-    if (!token || !isPollingEnabled) {
-      console.log('⏸️ Polling disabled or no token');
+    if (!token || !user || !isPollingEnabled) {
+      console.log('⏸️ Skipping fetch - token:', !!token, 'user:', !!user, 'user.id:', user?.id, 'polling:', isPollingEnabled);
       return;
     }
 
     try {
-      const response = await fetch(`${API_BASE_URL}orders/active`, {
+      console.log('📡 Fetching active order...');
+      console.log('📡 URL:', `${API_BASE_URL}/orders/active`);
+      console.log('📡 User ID:', user.id);
+      
+      const response = await fetch(`${API_BASE_URL}/orders/active`, {
         headers: {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
       });
 
+      console.log('📡 Response status:', response.status);
+
       if (response.status === 404) {
-        console.log('📦 No active orders');
+        console.log('📦 No active orders (404)');
         setActiveOrder(null);
         setError(null);
-        // Reset dismissed order when there's no active order
         setDismissedOrderId(null);
+        return;
+      }
+
+      if (response.status === 401) {
+        console.log('🔒 Unauthorized (401)');
+        setActiveOrder(null);
         return;
       }
 
       if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ Error response:', errorText);
         throw new Error(`Failed to fetch: ${response.status}`);
       }
 
       const data = await response.json();
-      console.log('📦 Active order fetched:', data.id);
+      console.log('📦 Active order received:', {
+        id: data?.id,
+        status: data?.order_status,
+        // restaurant: data?.restaurant_name,
+      });
 
-      // Check if this is a new order (different from dismissed order)
+      if (!data) {
+        console.log('📦 No data returned');
+        setActiveOrder(null);
+        return;
+      }
+
+      // Check dismissed orders
       if (dismissedOrderId && data.id !== dismissedOrderId) {
-        // New order detected, clear dismissed state and resume polling
         setDismissedOrderId(null);
         setIsPollingEnabled(true);
       }
 
-      // Don't show the order if it was dismissed and is delivered
       if (dismissedOrderId === data.id && data.order_status === 'delivered') {
-        console.log('🚫 Order dismissed, not showing banner');
+        console.log('🚫 Order dismissed');
         return;
       }
 
+      console.log('✅ Setting active order');
       setActiveOrder(data);
       setError(null);
     } catch (err) {
-      console.log('⚠️ Failed to fetch active order:', err);
+      console.error('⚠️ Fetch error:', err);
       setError(err instanceof Error ? err.message : 'Unknown error');
+      setActiveOrder(null);
     }
   };
 
@@ -152,11 +185,10 @@ export function OrderTrackingProvider({ children }: { children: ReactNode }) {
   };
 
   const dismissBanner = () => {
-    console.log('❌ Banner dismissed for delivered order');
+    console.log('❌ Dismissing banner');
     if (activeOrder?.order_status === 'delivered') {
-      setDismissedOrderId(activeOrder.id??null);
+      setDismissedOrderId(activeOrder.id);
       setActiveOrder(null);
-      // Keep polling to detect new orders, but don't show this dismissed order
     }
   };
 
@@ -168,18 +200,34 @@ export function OrderTrackingProvider({ children }: { children: ReactNode }) {
 
   // Polling effect
   useEffect(() => {
-    if (!token || !isPollingEnabled) return;
+    console.log('🔄 Polling effect triggered:', {
+      hasToken: !!token,
+      hasUser: !!user,
+      userId: user?.id,
+      isPollingEnabled,
+    });
+
+    if (!token || !user || !isPollingEnabled) {
+      console.log('⏸️ Polling NOT started - missing requirements');
+      return;
+    }
+
+    console.log('▶️ Starting order polling for user:', user.email);
 
     // Initial fetch
     fetchActiveOrder();
 
     // Poll every 10 seconds
     const interval = setInterval(() => {
+      console.log('⏰ Polling interval triggered');
       fetchActiveOrder();
     }, 10000);
 
-    return () => clearInterval(interval);
-  }, [token, isPollingEnabled, dismissedOrderId]);
+    return () => {
+      console.log('⏹️ Stopping order polling');
+      clearInterval(interval);
+    };
+  }, [token, user, isPollingEnabled, dismissedOrderId]);
 
   return (
     <OrderTrackingContext.Provider
@@ -195,12 +243,4 @@ export function OrderTrackingProvider({ children }: { children: ReactNode }) {
       {children}
     </OrderTrackingContext.Provider>
   );
-}
-
-export function useOrderTracking() {
-  const context = useContext(OrderTrackingContext);
-  if (!context) {
-    throw new Error('useOrderTracking must be used within OrderTrackingProvider');
-  }
-  return context;
 }

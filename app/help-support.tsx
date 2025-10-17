@@ -75,7 +75,7 @@ export default function HelpSupportScreen() {
     if (!token) return;
     
     try {
-      const response = await fetch(`${API_BASE_URL}support/tickets`, {
+      const response = await fetch(`${API_BASE_URL}/support/tickets`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -211,7 +211,7 @@ Thank you!`;
         priority: 'medium', // Default priority
       };
 
-      const response = await fetch(`${API_BASE_URL}support/tickets`, {
+      const response = await fetch(`${API_BASE_URL}/support/tickets`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -496,7 +496,7 @@ Thank you!`;
           
           <TouchableOpacity 
             style={styles.emailQuickButton}
-            onPress={() => Linking.openURL('mailto:support@smartbag.com')}
+            onPress={() => Linking.openURL('mailto:smartbag.help@smartbag.com')}
           >
             <Ionicons name="mail" size={20} color="#fff" />
             <Text style={styles.emailQuickText}>Email</Text>
@@ -533,9 +533,9 @@ Thank you!`;
               {/* Contact Info in Empty State */}
               <View style={styles.contactSection}>
                 <Text style={styles.contactTitle}>Other ways to reach us:</Text>
-                <TouchableOpacity style={styles.contactItem} onPress={() => Linking.openURL('mailto:support@smartbag.com')}>
+                <TouchableOpacity style={styles.contactItem} onPress={() => Linking.openURL('mailto:smartbag.help@smartbag.com')}>
                   <Ionicons name="mail-outline" size={20} color="#666" />
-                  <Text style={styles.contactText}>support@smartbag.com</Text>
+                  <Text style={styles.contactText}>smartbag.help@smartbag.com</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.contactItem} onPress={() => Linking.openURL(`tel:${WHATSAPP_NUMBER}`)}>
                   <Ionicons name="call-outline" size={20} color="#666" />

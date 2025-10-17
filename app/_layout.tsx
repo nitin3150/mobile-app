@@ -1,53 +1,109 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { useFonts } from 'expo-font';
-import { Stack } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
-import 'react-native-reanimated';
-import { View, Text } from 'react-native';
-
-import { useColorScheme } from '../hooks/useColorScheme';
+import { useEffect } from 'react';
+import { Stack, router, useSegments, useRootNavigationState } from 'expo-router';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import { OrderTrackingProvider } from '../contexts/OrderTrackingContext';
-import { ErrorBoundary } from '../components/ErrorBoundary';
-
-export default function RootLayout() {
-  return (
-    <ErrorBoundary>
-      <AuthProvider>
-        <OrderTrackingProvider>
-          <RootLayoutNav />
-        </OrderTrackingProvider>
-      </AuthProvider>
-    </ErrorBoundary>
-  );
-}
+import { View, ActivityIndicator, Text } from 'react-native';
 
 function RootLayoutNav() {
-  const colorScheme = useColorScheme();
-  const [loaded] = useFonts({
-    SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
-  });
+  const { user, loading, token } = useAuth();
+  const segments = useSegments();
+  const navigationState = useRootNavigationState();
 
-  const { token, loading } = useAuth();
+  useEffect(() => {
+    if (!navigationState?.key) {
+      return;
+    }
 
-  if (!loaded || loading) {
+    const inAuthGroup = segments[0] === 'auth';
+    const isPhoneScreen = segments[1] === 'phone';
+    const isLoginScreen = segments[1] === 'login';
+    const isRegisterScreen = segments[1] === 'register';
+    const isVerifyEmailScreen = segments[1] === 'verify-email';
+
+    console.log('🔍 Navigation check:', {
+      hasUser: !!user,
+      hasToken: !!token,
+      userEmail: user?.email,
+      userPhone: user?.phone,
+      inAuthGroup,
+      isPhoneScreen,
+      currentSegments: segments,
+      loading,
+    });
+
+    // Wait for loading to complete
+    if (loading) {
+      console.log('⏳ Auth still loading...');
+      return;
+    }
+
+    // ✅ Allow phone screen even when authenticated
+    if (isPhoneScreen) {
+      console.log('📱 On phone screen, allowing access');
+      return;  // Don't redirect away from phone screen
+    }
+
+    if (!token || !user) {
+      // User is not authenticated
+      console.log('🔒 No auth - need to show login');
+      if (!inAuthGroup) {
+        console.log('➡️ Redirecting to /auth/login');
+        setTimeout(() => {
+          router.replace('/auth/login');
+        }, 100);
+      }
+    } else {
+      // User is authenticated
+      console.log('✅ User authenticated:', user.email);
+      
+      // ✅ Don't redirect away from verification screens
+      if (inAuthGroup && !isPhoneScreen && !isVerifyEmailScreen) {
+        // Only redirect away from login/register screens
+        if (isLoginScreen || isRegisterScreen) {
+          console.log('➡️ Redirecting to home from login/register');
+          setTimeout(() => {
+            router.replace('/(tabs)');
+          }, 100);
+        }
+      }
+    }
+  }, [user, loading, token, segments, navigationState?.key]);
+
+  if (loading) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <Text>Loading...</Text>
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' }}>
+        <ActivityIndicator size="large" color="#007AFF" />
+        <Text style={{ marginTop: 20, fontSize: 16, color: '#666' }}>Loading...</Text>
+      </View>
+    );
+  }
+
+  if (!navigationState?.key) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' }}>
+        <ActivityIndicator size="large" color="#007AFF" />
+        <Text style={{ marginTop: 20, fontSize: 16, color: '#666' }}>Initializing...</Text>
       </View>
     );
   }
 
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="index" options={{ headerShown: false }} />
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="auth" options={{ headerShown: false }} />
-        <Stack.Screen name="order-tracking" options={{ headerShown: false }} />
-        <Stack.Screen name="+not-found" />
-      </Stack>
-      <StatusBar style="auto" />
-    </ThemeProvider>
+    <Stack screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack.Screen name="auth" options={{ headerShown: false }} />
+      <Stack.Screen name="order-tracking" options={{ headerShown: false }} />
+      <Stack.Screen name="notifications" options={{ headerShown: false }} />
+      <Stack.Screen name="index" options={{ headerShown: false }} />
+    </Stack>
+  );
+}
+
+export default function RootLayout() {
+  return (
+    <AuthProvider>
+      <OrderTrackingProvider>
+        <RootLayoutNav />
+      </OrderTrackingProvider>
+    </AuthProvider>
   );
 }

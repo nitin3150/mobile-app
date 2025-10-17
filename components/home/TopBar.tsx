@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { styles } from '../../styles/home.styles';
-import { API_BASE_URL } from '@/config/apiConfig';
+import { API_ENDPOINTS } from '@/config/apiConfig';
 
 interface TopBarProps {
   userAddress: string;
@@ -19,7 +19,7 @@ const TopBar: React.FC<TopBarProps> = ({ userAddress, cartCount, authLoading, to
     const fetchUnreadCount = async () => {
       if (!token) return;
       try {
-        const response = await fetch(`${API_BASE_URL}notifications/unread-count`, {
+        const response = await fetch(API_ENDPOINTS.UNREAD_COUNT, {
           headers: {
             Authorization: `Bearer ${token}`,
           },

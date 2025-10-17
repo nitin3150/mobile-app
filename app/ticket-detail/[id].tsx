@@ -94,7 +94,7 @@ export default function TicketDetailScreen() {
     if (!token) return;
     
     try {
-      const response = await fetch(`${API_BASE_URL}support/tickets/${id}`, {
+      const response = await fetch(`${API_BASE_URL}/support/tickets/${id}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -128,7 +128,7 @@ export default function TicketDetailScreen() {
 
     setSendingMessage(true);
     try {
-      const response = await fetch(`${API_BASE_URL}support/tickets/${ticket._id}/messages`, {
+      const response = await fetch(`${API_BASE_URL}/support/tickets/${ticket._id}/messages`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -78,7 +78,7 @@ export const RequestProductSection = forwardRef<RequestProductRef, RequestProduc
           description: formData.description.trim(),
         };
 
-        const response = await fetch(`${API_BASE_URL}support/product-requests`, {
+        const response = await fetch(`${API_BASE_URL}/support/product-requests`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

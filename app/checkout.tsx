@@ -15,12 +15,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../contexts/AuthContext';
-import { API_BASE_URL, IMAGE_BASE_URL, API_ENDPOINTS } from '../config/apiConfig';
+import { API_BASE_URL, API_ENDPOINTS } from '../config/apiConfig';
 
 interface CartItem {
   _id: string;
   product: {
-    _id: string;
+    id: string;
     name: string;
     price: number;
     images: string[];
@@ -113,7 +113,7 @@ export default function CheckoutScreen() {
 
   const loadDefaultAddress = async () => {
     try {
-      const addressResponse = await fetch(`${API_BASE_URL}address/my`, {
+      const addressResponse = await fetch(API_ENDPOINTS.MY_ADDRESS, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -132,7 +132,7 @@ export default function CheckoutScreen() {
           addresses = [addressData.address];
         }
         
-        const defaultAddress = addresses.find(addr => addr.is_default) || addresses[0];
+        const defaultAddress = addresses.find((addr: AddressData) => addr.is_default) || addresses[0];
         
         if (defaultAddress) {
           const addressParts = [];
@@ -266,7 +266,7 @@ export default function CheckoutScreen() {
 
     setPromoLoading(true);
     try {
-      const response = await fetch(`${API_BASE_URL}promocodes/validate`, {
+      const response = await fetch(`${API_BASE_URL}/promocodes/validate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useAuth } from '../contexts/AuthContext';
 import { API_BASE_URL } from '../config/apiConfig';
+import { API_ENDPOINTS } from '../config/apiConfig';
 
 interface Notification {
   id: string;
@@ -34,7 +35,7 @@ export default function NotificationsScreen() {
     if (!token) return;
 
     try {
-      const response = await fetch(`${API_BASE_URL}notifications`, {
+      const response = await fetch(API_ENDPOINTS.NOTIFICATIONS, {
         headers: {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -56,7 +57,7 @@ export default function NotificationsScreen() {
 
   const markAsRead = async (notificationId: string) => {
     try {
-      await fetch(`${API_BASE_URL}notifications/${notificationId}/read`, {
+      await fetch(`${API_ENDPOINTS.NOTIFICATIONS}/${notificationId}/read`, {
         method: 'PUT',
         headers: {
           Authorization: `Bearer ${token}`,

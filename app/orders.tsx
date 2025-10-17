@@ -16,7 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useAuth } from '../contexts/AuthContext';
-import { API_BASE_URL, IMAGE_BASE_URL, API_ENDPOINTS } from '../config/apiConfig';
+import { API_BASE_URL, API_ENDPOINTS } from '../config/apiConfig';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -110,7 +110,7 @@ export default function OrdersScreen() {
     
     try {
       setLoading(true);
-      const response = await fetch(`${API_BASE_URL}support/product-requests`, {
+      const response = await fetch(`${API_BASE_URL}/support/product-requests`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },

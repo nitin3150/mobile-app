@@ -9,6 +9,7 @@ import {
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
 import { secureStorage } from '../utils/secureStorage';
 import { InputValidator } from '../utils/validation';
+import { setAuthRef } from '../utils/authenticatedFetch';
 
 // Type definitions
 interface User {
@@ -42,6 +43,7 @@ interface AuthContextType {
   logout: () => Promise<void>;
   updateProfile: (updatedData: UpdateProfileData) => Promise<UpdateProfileResult>;
   refreshToken: () => Promise<boolean>;
+  reloadAuth: () => Promise<void>;
 }
 
 interface LoginResult {
@@ -106,18 +108,26 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshTokenValue, setRefreshTokenValue] = useState<string | null>(null);
 
-  // Get Google OAuth config from environment
-  // const getGoogleConfig = useCallback(() => {
-  //   const extra = Constants.expoConfig?.extra;
-  //   return {
-  //     webClientId: extra?.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || '',
-  //     iosClientId: extra?.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || '',
-  //   };
-  // }, []);
-
   useEffect(() => {
     loadStoredAuth();
   }, []);
+
+  const reloadAuth = async () => {
+    console.log('🔄 Manually reloading auth...');
+    await loadStoredAuth();
+  };
+
+  useEffect(() => {
+    if (token) {
+      console.log('🔗 Setting auth ref for authenticatedFetch');
+      setAuthRef({
+        token,
+        refreshTokenValue,
+        setToken,
+        logout,
+      });
+    }
+  }, [token, refreshTokenValue]);
 
   useEffect(() => {
     // Setup token refresh interval
@@ -127,7 +137,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       // Refresh token every 14 minutes (tokens usually expire in 15 minutes)
       refreshInterval = setInterval(() => {
         handleTokenRefresh();
-      }, 14 * 60 * 1000);
+      }, 10 * 60 * 1000);
     }
     
     return () => {
@@ -144,32 +154,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     await secureStorage.clearAuthData();
   };
 
-  // const validateToken = async (tokenToValidate: string): Promise<boolean> => {
-  //   try {
-  //     const response = await fetchWithTimeout(
-  //       API_ENDPOINTS.PROFILE,
-  //       {
-  //         headers: {
-  //           'Authorization': `Bearer ${tokenToValidate}`,
-  //         },
-  //       },
-  //       5000
-  //     );
-      
-  //     if (!response.ok) {
-  //       // Try to refresh token
-  //       if (refreshTokenValue) {
-  //         return await handleTokenRefresh();
-  //       }
-  //       return false;
-  //     }
-      
-  //     return true;
-  //   } catch (error) {
-  //     console.error('Token validation error:', error);
-  //     return false;
-  //   }
-  // };
+  const handleTokenStorage = async (accessToken: string, refreshToken: string) => {
+    try {
+      await secureStorage.storeAuthData(accessToken, refreshToken, null);
+      setToken(accessToken);
+      setRefreshTokenValue(refreshToken);
+      return true;
+    } catch (error) {
+      console.error('Error storing tokens:', error);
+      return false;
+    }
+  };
 
   const loadStoredAuth = async (): Promise<void> => {
     try {
@@ -180,6 +175,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         hasToken: !!authData.accessToken,
         hasRefreshToken: !!authData.refreshToken,
         hasUserData: !!authData.userData,
+        userEmail: authData.userData?.email,
       });
       
       if (authData.accessToken && authData.userData) {
@@ -189,19 +185,55 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         setUser(authData.userData);
         setRefreshTokenValue(authData.refreshToken);
         
-        // CRITICAL: Don't validate token immediately on app start for Google users
-        // This causes auto-logout issues
-        // Instead, let the token validation happen naturally when making API calls
-        
-        console.log('Auth loaded successfully');
+        console.log('✅ Auth loaded successfully');
+        console.log('✅ User state set:', authData.userData.email);
       } else {
         console.log('No complete auth data found in storage');
+        
+        // If we have a token but no user, try to fetch user
+        if (authData.accessToken && !authData.userData) {
+          console.log('Token found but no user data, fetching profile...');
+          setToken(authData.accessToken);
+          setRefreshTokenValue(authData.refreshToken);
+          
+          try {
+            const profileResponse = await fetchWithTimeout(
+              API_ENDPOINTS.PROFILE,
+              {
+                headers: {
+                  'Authorization': `Bearer ${authData.accessToken}`,
+                },
+              },
+              5000
+            );
+            
+            if (profileResponse.ok) {
+              const userData = await profileResponse.json();
+              setUser(userData);
+              await secureStorage.storeAuthData(
+                authData.accessToken,
+                authData.refreshToken,
+                userData
+              );
+              console.log('✅ User profile fetched and stored');
+            } else {
+              // ✅ Token invalid, clear everything
+              console.log('❌ Token invalid, clearing auth');
+              await clearAuth();
+            }
+          } catch (profileError) {
+            console.error('Failed to fetch profile on load:', profileError);
+            // ✅ Clear auth on profile fetch failure
+            await clearAuth();
+          }
+        }
       }
     } catch (error) {
       console.error('Error loading stored auth:', error);
-      // Don't clear auth on load error - might be temporary
-      console.log('Keeping existing auth state despite load error');
+      // ✅ Clear auth on error
+      await clearAuth();
     } finally {
+      console.log('✅ Auth loading complete, setting loading to false');
       setLoading(false);
     }
   };
@@ -215,11 +247,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (!emailValidation.isValid) {
         return { success: false, error: emailValidation.error };
       }
-
+  
       if (!password) {
         return { success: false, error: 'Password is required' };
       }
-
+  
       const response = await fetchWithTimeout(
         createApiUrl('auth/login'),
         {
@@ -234,28 +266,51 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         },
         API_REQUEST_TIMEOUT
       );
-
+  
       const data = await response.json();
       console.log('Login response received');
-
+  
       if (!response.ok) {
         const errorMessage = data.detail || data.message || 'Login failed';
         return { success: false, error: errorMessage };
       }
-
-      // Store authentication data securely
+  
+      // ✅ Store authentication data securely
       await secureStorage.storeAuthData(
         data.access_token,
         data.refresh_token,
-        data.user
+        null  // Will fetch user data next
       );
-
-      console.log("access token: ",data.access_token)
-      console.log("access token: ",data.refresh_token)
-
+  
+      console.log("Access token stored");
+  
       setToken(data.access_token);
       setRefreshTokenValue(data.refresh_token);
-      setUser(data.user);
+      
+      // ✅ Fetch user profile
+      try {
+        const profileResponse = await fetchWithTimeout(
+          API_ENDPOINTS.PROFILE,
+          {
+            headers: {
+              'Authorization': `Bearer ${data.access_token}`,
+            },
+          },
+          5000
+        );
+        
+        if (profileResponse.ok) {
+          const userData = await profileResponse.json();
+          setUser(userData);
+          await secureStorage.storeAuthData(
+            data.access_token,
+            data.refresh_token,
+            userData
+          );
+        }
+      } catch (profileError) {
+        console.error('Error fetching profile:', profileError);
+      }
       
       return { 
         success: true,
@@ -317,7 +372,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         await secureStorage.storeAuthData(
           data.access_token,
           data.refresh_token,
-          data.user
+          data.user,
         );
 
         setToken(data.access_token);
@@ -360,42 +415,91 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         },
         API_REQUEST_TIMEOUT
       );
-  
+
       const data = await response.json();
       console.log('Google login response received');
       
       if (!response.ok) {
-        const errorMessage = data.message || 'Google login failed';
+        const errorMessage = data.message || data.detail || 'Google login failed';
         return { success: false, error: errorMessage };
       }
-  
-      // CRITICAL: Verify we have tokens before proceeding
-      if (!data.access_token || !data.user) {
-        console.error('Google login response missing required data:', data);
-        return { success: false, error: 'Invalid server response' };
+
+      if (!data.access_token) {
+        console.error('Google login response missing access token:', data);
+        return { success: false, error: 'Invalid server response - missing access token' };
       }
-  
-      console.log('Storing auth data securely...');
+
+      console.log('Storing tokens...');
+      setToken(data.access_token);
+      setRefreshTokenValue(data.refresh_token);
       
-      // Store authentication data securely
+      console.log('Fetching user profile...');
       try {
+        const profileResponse = await fetchWithTimeout(
+          API_ENDPOINTS.PROFILE,
+          {
+            headers: {
+              'Authorization': `Bearer ${data.access_token}`,
+            },
+          },
+          10000
+        );
+        
+        if (profileResponse.ok) {
+          const userData = await profileResponse.json();
+          console.log('✅ User profile fetched:', JSON.stringify(userData));
+          
+          setUser(userData);
+          
+          // Store complete auth data
+          await secureStorage.storeAuthData(
+            data.access_token,
+            data.refresh_token,
+            userData
+          );
+          
+          console.log('✅ Complete auth data stored');
+        } else {
+          console.error('❌ Failed to fetch profile, status:', profileResponse.status);
+          // Fallback to basic user info
+          const basicUser = {
+            _id: userInfo.googleId || userInfo.id || '',
+            email: userInfo.email,
+            name: userInfo.name,
+            id: '',
+            role: 'customer',
+            is_active: true,
+          };
+
+          setUser(basicUser);
+          await secureStorage.storeAuthData(
+            data.access_token,
+            data.refresh_token,
+            basicUser
+          );
+        }
+      } catch (profileError) {
+        console.error('❌ Error fetching profile:', profileError);
+        // Set basic user info as fallback
+        const basicUser = {
+          _id: userInfo.googleId || userInfo.id || '',
+          email: userInfo.email,
+          name: userInfo.name,
+          id: '',
+          role: 'customer',
+          is_active: true,
+        };
+        
+        setUser(basicUser);
         await secureStorage.storeAuthData(
           data.access_token,
           data.refresh_token,
-          data.user
+          basicUser
         );
-        console.log('Auth data stored successfully in secure storage');
-      } catch (storageError) {
-        console.error('CRITICAL: Failed to store auth data:', storageError);
-        // Continue anyway - at least set in memory
       }
-  
-      setToken(data.access_token);
-      setRefreshTokenValue(data.refresh_token);
-      setUser(data.user);
       
       console.log('Google login complete, user state set');
-  
+
       return { 
         success: true,
         requires_phone: data.requires_phone || false
@@ -414,7 +518,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (!token) {
         return { success: false, error: 'Not authenticated. Please login again.' };
       }
-
+  
       // Phone validation
       const phoneValidation = InputValidator.validatePhone(phone);
       if (!phoneValidation.isValid) {
@@ -433,10 +537,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         },
         API_REQUEST_TIMEOUT
       );
-
+  
       const data = await response.json();
-      console.log('Phone update response received');
-
+      console.log('Phone update response received:', data);
+  
       if (!response.ok) {
         if (response.status === 401) {
           await clearAuth();
@@ -445,15 +549,46 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         const errorMessage = data.detail || data.message || 'Failed to update phone number';
         return { success: false, error: errorMessage };
       }
-
-      // Update user data
-      const updatedUser = data.user || { ...user, phone: phoneValidation.sanitizedValue };
-      setUser(updatedUser);
+  
+      // ✅ Update user data from response
+      if (data.user) {
+        const updatedUser = data.user;
+        setUser(updatedUser);
+        
+        // Update stored user data
+        await secureStorage.storeAuthData(token, refreshTokenValue ?? undefined, updatedUser);
+        
+        console.log('✅ User state updated with phone:', updatedUser.phone);
+        console.log('✅ User email:', updatedUser.email);
+        
+        return { success: true, user: updatedUser };
+      }
       
-      // Update stored user data
-      await secureStorage.storeAuthData(token, refreshTokenValue ?? undefined, updatedUser);
+      // ✅ If no user in response, fetch profile
+      console.log('⚠️ No user in phone update response, fetching profile...');
+      try {
+        const profileResponse = await fetchWithTimeout(
+          API_ENDPOINTS.PROFILE,
+          {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+            },
+          },
+          5000
+        );
+        
+        if (profileResponse.ok) {
+          const userData = await profileResponse.json();
+          setUser(userData);
+          await secureStorage.storeAuthData(token, refreshTokenValue ?? undefined, userData);
+          console.log('✅ User profile fetched after phone update');
+          return { success: true, user: userData };
+        }
+      } catch (profileError) {
+        console.error('Error fetching profile:', profileError);
+      }
       
-      return { success: true, user: updatedUser };
+      return { success: true };
     } catch (error) {
       console.error('Phone update error:', error);
       const errorMessage = error instanceof Error ? error.message : 'Network error. Please try again.';
@@ -700,7 +835,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     verifyPhone,
     logout,
     updateProfile,
+    handleTokenStorage,
     refreshToken: handleTokenRefresh,
+    reloadAuth,
   };
 
   return (
