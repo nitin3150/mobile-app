@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../contexts/AuthContext';
 import { API_BASE_URL, API_ENDPOINTS } from '../config/apiConfig';
+import { authenticatedFetch } from '../utils/authenticatedFetch';
 
 interface CartItem {
   _id: string;
@@ -30,18 +31,25 @@ interface CartItem {
   quantity: number;
 }
 
-interface Coordinates{
+interface Coordinates {
   latitude: number;
   longitude: number;
 }
 
 interface AddressData {
   _id?: string;
+  label?: string;
+  street?: string;
   address: string;
   city: string;
   state: string;
   pincode: string;
+  mobile_number?: string;
+  phone: string;
+  landmark?: string;
   fullAddress: string;
+  latitude?: number;
+  longitude?: number;
   coordinates?: Coordinates;
   is_default?: boolean;
 }
@@ -56,7 +64,7 @@ interface PromoCode {
 }
 
 export default function CheckoutScreen() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const params = useLocalSearchParams();
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -85,9 +93,7 @@ export default function CheckoutScreen() {
 
   const loadData = async () => {
     try {
-      const cartResponse = await fetch(API_ENDPOINTS.CART, {
-        headers: { 'Authorization': `Bearer ${token}` },
-      });
+      const cartResponse = await authenticatedFetch(API_ENDPOINTS.CART);
       
       if (cartResponse.ok) {
         const cartData = await cartResponse.json();
@@ -113,42 +119,42 @@ export default function CheckoutScreen() {
 
   const loadDefaultAddress = async () => {
     try {
-      const addressResponse = await fetch(API_ENDPOINTS.MY_ADDRESS, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      });
+      const addressResponse = await authenticatedFetch(API_ENDPOINTS.MY_ADDRESS);
       
       if (addressResponse.ok) {
         const addressData = await addressResponse.json();
+        console.log('📍 Loaded addresses:', addressData);
         
         let addresses = [];
         if (Array.isArray(addressData)) {
           addresses = addressData;
         } else if (addressData.addresses && Array.isArray(addressData.addresses)) {
           addresses = addressData.addresses;
-        } else if (addressData.address) {
-          addresses = [addressData.address];
         }
         
-        const defaultAddress = addresses.find((addr: AddressData) => addr.is_default) || addresses[0];
+        const defaultAddress = addresses.find((addr: any) => addr.is_default) || addresses[0];
         
         if (defaultAddress) {
-          const addressParts = [];
-          if (defaultAddress.address) addressParts.push(defaultAddress.address);
-          if (defaultAddress.city) addressParts.push(defaultAddress.city);
-          if (defaultAddress.state) addressParts.push(defaultAddress.state);
-          if (defaultAddress.pincode) addressParts.push(defaultAddress.pincode);
+          console.log('📍 Default address:', defaultAddress);
           
+          // ✅ Format address with all fields including coordinates
           setDeliveryAddress({
             _id: defaultAddress._id,
-            address: addressParts.join(', '),
+            label: defaultAddress.label,
+            street: defaultAddress.street,
+            address: defaultAddress.street || defaultAddress.address,
             city: defaultAddress.city || '',
             state: defaultAddress.state || '',
             pincode: defaultAddress.pincode || '',
-            fullAddress: addressParts.join(', '),
-            coordinates: defaultAddress.coordinates,
+            mobile_number: defaultAddress.mobile_number,
+            phone: defaultAddress.mobile_number || defaultAddress.phone || user?.phone || '',
+            landmark: defaultAddress.landmark,
+            fullAddress: `${defaultAddress.street || defaultAddress.address}, ${defaultAddress.city}, ${defaultAddress.state} ${defaultAddress.pincode}`,
+            latitude: defaultAddress.latitude,
+            longitude: defaultAddress.longitude,
+            coordinates: defaultAddress.latitude && defaultAddress.longitude 
+              ? { latitude: defaultAddress.latitude, longitude: defaultAddress.longitude }
+              : undefined,
             is_default: defaultAddress.is_default,
           });
         }
@@ -158,26 +164,38 @@ export default function CheckoutScreen() {
     }
   };
 
+  // ✅ Update address from params (when user selects from address page)
   useEffect(() => {
     const addressFromParams = params.address as string;
     const fullAddressFromParams = params.fullAddress as string;
     
     if (addressFromParams && fullAddressFromParams) {
+      console.log('📍 Address from params:', params);
+      
       setDeliveryAddress({
+        _id: params.addressId as string,
+        label: params.addressLabel as string,
+        street: addressFromParams,
         address: addressFromParams,
         city: params.city as string || '',
         state: params.state as string || '',
         pincode: params.pincode as string || '',
+        mobile_number: params.mobile_number as string,
+        phone: params.mobile_number as string || params.phone as string || user?.phone || '',
+        landmark: params.landmark as string,
         fullAddress: fullAddressFromParams,
+        latitude: params.latitude ? Number(params.latitude) : undefined,
+        longitude: params.longitude ? Number(params.longitude) : undefined,
         coordinates: params.latitude && params.longitude
-        ? {
-            latitude: Number(params.latitude),
-            longitude: Number(params.longitude),
-          }
-        : undefined,
+          ? {
+              latitude: Number(params.latitude),
+              longitude: Number(params.longitude),
+            }
+          : undefined,
+        is_default: params.is_default === 'true',
       });
     }
-  }, [params.address, params.fullAddress, params.city, params.state, params.pincode, params.latitude, params.longitude]);
+  }, [params]);
 
   const updateCartQuantity = async (itemId: string, newQuantity: number) => {
     if (newQuantity <= 0) {
@@ -205,11 +223,10 @@ export default function CheckoutScreen() {
     setUpdatingQuantity(prev => ({ ...prev, [itemId]: true }));
 
     try {
-      const response = await fetch(API_ENDPOINTS.CART_UPDATE, {
+      const response = await authenticatedFetch(API_ENDPOINTS.CART_UPDATE, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify({ itemId, quantity: newQuantity }),
       });
@@ -236,13 +253,12 @@ export default function CheckoutScreen() {
     setUpdatingQuantity(prev => ({ ...prev, [itemId]: true }));
 
     try {
-      const response = await fetch(`${API_ENDPOINTS.CART_REMOVE}?item_id=${itemId}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      });
+      const response = await authenticatedFetch(
+        `${API_ENDPOINTS.CART_REMOVE}?item_id=${itemId}`,
+        {
+          method: 'DELETE',
+        }
+      );
 
       if (response.ok) {
         setCartItems(prevItems => prevItems.filter(item => item._id !== itemId));
@@ -266,21 +282,22 @@ export default function CheckoutScreen() {
 
     setPromoLoading(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/promocodes/validate`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          code: promoCode.trim().toUpperCase(),
-          order_amount: getSubtotal(),
-        }),
-      });
+      const response = await authenticatedFetch(
+        `${API_BASE_URL}/promocodes/validate`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            code: promoCode.trim().toUpperCase(),
+            order_amount: getSubtotal(),
+          }),
+        }
+      );
 
       const data = await response.json();
 
-      // console.log(data)
       if (response.ok && data.valid) {
         setAppliedPromo(data.promocode);
         calculatePromoDiscount(data.promocode);
@@ -325,11 +342,9 @@ export default function CheckoutScreen() {
   const showSuccessAnimation = () => {
     setShowSuccess(true);
     
-    // Reset animations to start from center (scale 0)
     scaleAnim.setValue(0);
     fadeAnim.setValue(0);
     
-    // Animate checkmark - grow from center
     Animated.parallel([
       Animated.spring(scaleAnim, {
         toValue: 1,
@@ -344,7 +359,6 @@ export default function CheckoutScreen() {
       }),
     ]).start();
 
-    // Hide after 2.5 seconds and navigate
     setTimeout(() => {
       Animated.parallel([
         Animated.timing(scaleAnim, {
@@ -380,10 +394,6 @@ export default function CheckoutScreen() {
     
     if (subtotal >= settings.delivery_fee.free_delivery_threshold) {
       return 0;
-    }
-    
-    if (settings.delivery_fee.type === 'fixed') {
-      return settings.delivery_fee.base_fee;
     }
     
     return settings.delivery_fee.base_fee;
@@ -424,8 +434,15 @@ export default function CheckoutScreen() {
       return;
     }
 
+    // ✅ Validate complete address
     if (!deliveryAddress.address || !deliveryAddress.city || !deliveryAddress.state || !deliveryAddress.pincode) {
       Alert.alert('Error', 'Please provide complete address information');
+      return;
+    }
+
+    // ✅ Validate phone number
+    if (!deliveryAddress.phone && !deliveryAddress.mobile_number) {
+      Alert.alert('Error', 'Please provide a phone number for delivery');
       return;
     }
 
@@ -436,19 +453,41 @@ export default function CheckoutScreen() {
 
     setPlacingOrder(true);
     try {
+      // ✅ Prepare complete delivery address with all fields
+      const deliveryAddressData = {
+        // Address text fields
+        street: deliveryAddress.street || deliveryAddress.address,
+        address: deliveryAddress.address,
+        city: deliveryAddress.city,
+        state: deliveryAddress.state,
+        pincode: deliveryAddress.pincode,
+        
+        // Contact information
+        phone: deliveryAddress.phone || deliveryAddress.mobile_number || user?.phone || '',
+        mobile_number: deliveryAddress.mobile_number || deliveryAddress.phone || user?.phone || '',
+        
+        // Optional fields
+        label: deliveryAddress.label || 'Home',
+        landmark: deliveryAddress.landmark || '',
+        
+        // ✅ GPS Coordinates - include if available
+        ...(deliveryAddress.latitude && deliveryAddress.longitude && {
+          latitude: deliveryAddress.latitude,
+          longitude: deliveryAddress.longitude,
+          coordinates: {
+            latitude: deliveryAddress.latitude,
+            longitude: deliveryAddress.longitude,
+          }
+        }),
+      };
+
       const orderData = {
         items: cartItems.map(item => ({
           product: item.product.id,
           quantity: item.quantity,
           price: item.product.price,
         })),
-        delivery_address: {
-          address: deliveryAddress.address.trim(),
-          city: deliveryAddress.city.trim(),
-          state: deliveryAddress.state.trim(),
-          pincode: deliveryAddress.pincode.trim(),
-          coordinates: deliveryAddress.coordinates,
-        },
+        delivery_address: deliveryAddressData,  // ✅ Complete address with coordinates
         payment_method: paymentMethod,
         subtotal: getSubtotal(),
         tax: getTax(),
@@ -458,20 +497,30 @@ export default function CheckoutScreen() {
         promo_discount: promoDiscount,
         total_amount: getTotal(),
       };
+      
+      console.log('📦 Placing order with data:', {
+        itemsCount: orderData.items.length,
+        hasCoordinates: !!(deliveryAddressData.latitude && deliveryAddressData.longitude),
+        coordinates: deliveryAddressData.coordinates,
+        phone: deliveryAddressData.phone,
+        address: deliveryAddressData.address,
+      });
 
-      const response = await fetch(API_ENDPOINTS.ORDERS, {
+      const response = await authenticatedFetch(API_ENDPOINTS.ORDERS, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify(orderData),
       });
 
       if (response.ok) {
+        const orderResult = await response.json();
+        console.log('✅ Order placed successfully:', orderResult);
         showSuccessAnimation();
       } else {
         const errorData = await response.json();
+        console.error('❌ Order placement failed:', errorData);
         Alert.alert('Error', errorData.detail || 'Failed to place order');
       }
     } catch (error) {
@@ -516,14 +565,15 @@ export default function CheckoutScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backButton} disabled={placingOrder}>
           <Ionicons name="arrow-back" size={24} color="#333" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Checkout</Text>
         <View style={styles.placeholder} />
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView style={styles.content} showsVerticalScrollIndicator={false} scrollEnabled={!placingOrder}>
+        {/* Delivery Address Section */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Ionicons name="location-outline" size={24} color="#007AFF" />
@@ -533,16 +583,40 @@ export default function CheckoutScreen() {
           {deliveryAddress ? (
             <View style={styles.addressCard}>
               <View style={styles.addressInfo}>
+                <View style={styles.addressLabelRow}>
+                  {deliveryAddress.label && (
+                    <View style={styles.labelBadge}>
+                      <Ionicons 
+                        name={deliveryAddress.label === 'Home' ? 'home' : deliveryAddress.label === 'Office' ? 'business' : 'location'} 
+                        size={14} 
+                        color="#007AFF" 
+                      />
+                      <Text style={styles.labelText}>{deliveryAddress.label}</Text>
+                    </View>
+                  )}
+                  {deliveryAddress.is_default && (
+                    <View style={styles.defaultBadge}>
+                      <Text style={styles.defaultBadgeText}>Default</Text>
+                    </View>
+                  )}
+                </View>
                 <Text style={styles.addressText}>{deliveryAddress.fullAddress}</Text>
-                {deliveryAddress.is_default && (
-                  <View style={styles.defaultBadge}>
-                    <Text style={styles.defaultBadgeText}>Default</Text>
+                {deliveryAddress.phone && (
+                  <Text style={styles.phoneText}>📱 {deliveryAddress.phone}</Text>
+                )}
+                {deliveryAddress.latitude && deliveryAddress.longitude && (
+                  <View style={styles.coordinatesRow}>
+                    <Ionicons name="navigate" size={12} color="#4CAF50" />
+                    <Text style={styles.coordinatesText}>
+                      GPS: {deliveryAddress.latitude.toFixed(4)}, {deliveryAddress.longitude.toFixed(4)}
+                    </Text>
                   </View>
                 )}
               </View>
               <TouchableOpacity 
                 style={styles.changeAddressButton}
                 onPress={handleSelectAddress}
+                disabled={placingOrder}
               >
                 <Ionicons name="create-outline" size={16} color="#007AFF" />
                 <Text style={styles.changeAddressText}>Change</Text>
@@ -552,6 +626,7 @@ export default function CheckoutScreen() {
             <TouchableOpacity 
               style={styles.selectAddressButton}
               onPress={handleSelectAddress}
+              disabled={placingOrder}
             >
               <Ionicons name="add-circle-outline" size={24} color="#007AFF" />
               <Text style={styles.selectAddressText}>Select Delivery Address</Text>
@@ -560,6 +635,7 @@ export default function CheckoutScreen() {
           )}
         </View>
 
+        {/* Order Summary Section */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Ionicons name="list-outline" size={24} color="#007AFF" />
@@ -577,7 +653,7 @@ export default function CheckoutScreen() {
                   <TouchableOpacity
                     style={[styles.quantityButton, updatingQuantity[item._id] && styles.disabledQuantityButton]}
                     onPress={() => updateCartQuantity(item._id, item.quantity - 1)}
-                    disabled={updatingQuantity[item._id]}
+                    disabled={updatingQuantity[item._id] || placingOrder}
                   >
                     <Ionicons name="remove" size={16} color="#007AFF" />
                   </TouchableOpacity>
@@ -613,6 +689,7 @@ export default function CheckoutScreen() {
           ))}
         </View>
 
+        {/* Promo Code Section */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Ionicons name="pricetag-outline" size={24} color="#007AFF" />
@@ -630,7 +707,7 @@ export default function CheckoutScreen() {
                   </Text>
                 </View>
               </View>
-              <TouchableOpacity onPress={removePromoCode}>
+              <TouchableOpacity onPress={removePromoCode} disabled={placingOrder}>
                 <Ionicons name="close-circle" size={24} color="#FF6B6B" />
               </TouchableOpacity>
             </View>
@@ -642,12 +719,12 @@ export default function CheckoutScreen() {
                 value={promoCode}
                 onChangeText={setPromoCode}
                 autoCapitalize="characters"
-                editable={!promoLoading}
+                editable={!promoLoading && !placingOrder} 
               />
               <TouchableOpacity
                 style={[styles.applyPromoButton, promoLoading && styles.disabledButton]}
                 onPress={applyPromoCode}
-                disabled={promoLoading}
+                disabled={promoLoading || placingOrder}
               >
                 {promoLoading ? (
                   <ActivityIndicator size="small" color="#fff" />
@@ -659,6 +736,7 @@ export default function CheckoutScreen() {
           )}
         </View>
 
+        {/* Price Breakdown Section */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Ionicons name="calculator-outline" size={24} color="#007AFF" />
@@ -693,9 +771,7 @@ export default function CheckoutScreen() {
           </View>
           
           <View style={styles.priceRow}>
-            <Text style={styles.priceLabel}>
-              App Fee ({settings?.app_fee?.type === 'percentage' ? `${settings.app_fee.value}%` : 'Fixed'})
-            </Text>
+            <Text style={styles.priceLabel}>App Fee</Text>
             <Text style={styles.priceValue}>₹{getAppFee().toFixed(2)}</Text>
           </View>
           
@@ -705,6 +781,7 @@ export default function CheckoutScreen() {
           </View>
         </View>
 
+        {/* Payment Method Section */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Ionicons name="card-outline" size={24} color="#007AFF" />
@@ -714,6 +791,7 @@ export default function CheckoutScreen() {
           <TouchableOpacity 
             style={styles.paymentOption}
             onPress={() => setPaymentMethod('cod')}
+            disabled={placingOrder}
           >
             <View style={styles.paymentOptionLeft}>
               <Ionicons name="cash-outline" size={24} color="#007AFF" />
@@ -725,8 +803,11 @@ export default function CheckoutScreen() {
             <Ionicons name="checkmark-circle" size={24} color="#007AFF" />
           </TouchableOpacity>
         </View>
+
+        <View style={{ height: 100 }} />
       </ScrollView>
 
+      {/* Footer with Place Order Button */}
       <View style={styles.footer}>
         <TouchableOpacity
           style={[styles.placeOrderButton, placingOrder && styles.disabledButton]}
@@ -765,6 +846,17 @@ export default function CheckoutScreen() {
           </Animated.View>
         </View>
       </Modal>
+
+      {placingOrder && (
+        <View style={styles.loadingOverlay}>
+          <View style={styles.loadingOverlayContent}>
+            <ActivityIndicator size="large" color="#007AFF" />
+            <Text style={styles.loadingOverlayText}>Placing your order...</Text>
+            <Text style={styles.loadingOverlaySubtext}>Please wait, don't close the app</Text>
+          </View>
+        </View>
+      )}
+
     </SafeAreaView>
   );
 }
@@ -798,6 +890,50 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
   },
+  disabledSection: {
+    opacity: 0.6,
+  },
+  disabledInput: {
+    backgroundColor: '#f0f0f0',
+    color: '#999',
+  },
+  disabledText: {
+    color: '#999',
+  },
+  loadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 9999,
+  },
+  loadingOverlayContent: {
+    alignItems: 'center',
+    padding: 40,
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  loadingOverlayText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+    marginTop: 16,
+  },
+  loadingOverlaySubtext: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 8,
+    textAlign: 'center',
+  },
   section: {
     backgroundColor: '#fff',
     marginTop: 8,
@@ -825,18 +961,53 @@ const styles = StyleSheet.create({
   addressInfo: {
     marginBottom: 12,
   },
-  addressText: {
-    fontSize: 16,
+  addressLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    gap: 8,
+  },
+  labelBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#E3F2FD',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 4,
+  },
+  labelText: {
+    fontSize: 12,
     fontWeight: '600',
+    color: '#007AFF',
+  },
+  addressText: {
+    fontSize: 15,
     color: '#333',
+    lineHeight: 20,
+    marginBottom: 4,
+  },
+  phoneText: {
+    fontSize: 14,
+    color: '#007AFF',
+    marginTop: 4,
+  },
+  coordinatesRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    gap: 4,
+  },
+  coordinatesText: {
+    fontSize: 11,
+    color: '#4CAF50',
+    // fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
   },
   defaultBadge: {
     backgroundColor: '#4CAF50',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,
-    alignSelf: 'flex-start',
-    marginTop: 8,
   },
   defaultBadgeText: {
     color: '#fff',
@@ -1018,12 +1189,12 @@ const styles = StyleSheet.create({
     color: '#4CAF50',
   },
   freeDeliveryText: {
-    color: '#007AFF',
+    color: '#4CAF50',
     fontWeight: '600',
   },
   totalRow: {
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
+    borderTopWidth: 2,
+    borderTopColor: '#007AFF',
     paddingTop: 12,
     marginTop: 8,
   },
@@ -1033,7 +1204,7 @@ const styles = StyleSheet.create({
     color: '#333',
   },
   totalValue: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: 'bold',
     color: '#007AFF',
   },
@@ -1050,7 +1221,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 16,
     borderRadius: 8,
-    gap: 8,
   },
   disabledButton: {
     backgroundColor: '#ccc',

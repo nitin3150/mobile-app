@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Order, TabType } from '../../types/delivery.types';
 import OrderCard from './OrderCard';
 import { styles } from '../../styles/delivery.styles';
+import { openMapsWithAddress } from '../../utils/mapUtils';
 
 interface OrdersListProps {
   currentTab: TabType;

@@ -19,6 +19,7 @@ import * as Location from 'expo-location';
 import { useAuth } from '../contexts/AuthContext';
 import { API_ENDPOINTS } from '../config/apiConfig';
 import { authenticatedFetch } from '../utils/authenticatedFetch';
+import { openMapsWithAddress } from '../utils/mapUtils';
 
 interface SavedAddress {
   _id: string;
@@ -78,6 +79,15 @@ export default function AddressScreen() {
   // Editing states
   const [editingAddress, setEditingAddress] = useState<SavedAddress | null>(null);
   const [editMode, setEditMode] = useState(false);
+
+  const handleGetDirections = (address: SavedAddress) => {
+    openMapsWithAddress({
+      latitude: address.latitude,
+      longitude: address.longitude,
+      label: address.label,
+      street: address.street,
+    });
+  };
 
   // Get current location and reverse geocode
   const getCurrentLocation = useCallback(async () => {
@@ -343,6 +353,33 @@ export default function AddressScreen() {
   };
 
   // Set default address
+  // const selectAndSetDefault = async (address: SavedAddress) => {
+  //   try {
+  //     const response = await authenticatedFetch(
+  //       `${API_ENDPOINTS.USER_ADDRESS}/${address._id}/set-default`,
+  //       {
+  //         method: 'POST',
+  //       }
+  //     );
+
+  //     if (response.ok) {
+  //       setSelectedAddress(address);
+        
+  //       if (isFromCheckout) {
+  //         router.back();
+  //       } else {
+  //         Alert.alert('Success', 'Default address updated');
+  //         await fetchSavedAddresses();
+  //       }
+  //     } else {
+  //       Alert.alert('Error', 'Failed to set default address');
+  //     }
+  //   } catch (error) {
+  //     console.error('Error setting default address:', error);
+  //     Alert.alert('Error', 'Network error. Please try again.');
+  //   }
+  // };
+
   const selectAndSetDefault = async (address: SavedAddress) => {
     try {
       const response = await authenticatedFetch(
@@ -351,14 +388,33 @@ export default function AddressScreen() {
           method: 'POST',
         }
       );
-
+  
       if (response.ok) {
         setSelectedAddress(address);
         
         if (isFromCheckout) {
+          const fullAddress = `${address.street}, ${address.city}, ${address.state}, ${address.pincode}`;
           router.back();
+          setTimeout(() => {
+            router.setParams({
+              addressId: address._id,
+              addressLabel: address.label,
+              address: address.street,
+              city: address.city,
+              state: address.state,
+              pincode: address.pincode,
+              mobile_number: address.mobile_number || '',
+              phone: address.mobile_number || '',
+              landmark: address.landmark || '',
+              fullAddress: fullAddress,
+              // ✅ Include coordinates
+              latitude: address.latitude?.toString() || '',
+              longitude: address.longitude?.toString() || '',
+              is_default: address.is_default ? 'true' : 'false',
+            });
+          }, 100);
         } else {
-          Alert.alert('Success', 'Default address updated');
+          Alert.alert('Success', 'Default address updated successfully');
           await fetchSavedAddresses();
         }
       } else {
@@ -542,8 +598,15 @@ export default function AddressScreen() {
           </Text>
         )}
       </TouchableOpacity>
-      
       <View style={styles.addressActions}>
+        {item.latitude && item.longitude && (
+          <TouchableOpacity
+            style={styles.directionsButton}
+            onPress={() => openMapsWithAddress(item)}
+          >
+            <Ionicons name="navigate" size={16} color="#007AFF" />
+          </TouchableOpacity>
+        )}
         <TouchableOpacity
           style={styles.editButton}
           onPress={() => editAddress(item)}
@@ -838,6 +901,10 @@ const styles = StyleSheet.create({
   },
   backButton: {
     padding: 8,
+  },
+  directionsButton: {
+    padding: 8,
+    marginRight: 4,
   },
   headerTitle: {
     fontSize: 18,
