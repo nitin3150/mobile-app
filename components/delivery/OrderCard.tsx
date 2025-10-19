@@ -41,9 +41,9 @@ const OrderCard: React.FC<OrderCardProps> = ({
 
       const fallbackUrl = `https://www.google.com/maps/dir/?api=1&destination=${address.latitude},${address.longitude}`;
 
-      Linking.canOpenURL(url).then((supported) => {
+      Linking.canOpenURL(url!).then((supported) => {
         if (supported) {
-          Linking.openURL(url);
+          Linking.openURL(url!);
         } else {
           Linking.openURL(fallbackUrl);
         }
@@ -60,9 +60,9 @@ const OrderCard: React.FC<OrderCardProps> = ({
 
       const fallbackUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addressString)}`;
 
-      Linking.canOpenURL(url).then((supported) => {
+      Linking.canOpenURL(url!).then((supported) => {
         if (supported) {
-          Linking.openURL(url);
+          Linking.openURL(url!);
         } else {
           Linking.openURL(fallbackUrl);
         }
@@ -74,7 +74,7 @@ const OrderCard: React.FC<OrderCardProps> = ({
 
   // ✅ FIX: Handle calling customer
   const handleCallCustomer = () => {
-    const phone = item.delivery_address?.phone || item.delivery_address?.mobile_number;
+    const phone = item.delivery_address?.phone;
     
     if (phone) {
       Linking.openURL(`tel:${phone}`);

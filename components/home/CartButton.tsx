@@ -22,7 +22,7 @@ const CartButton: React.FC<CartButtonProps> = ({
   const productId = product.id;
   const quantity = cartQuantities[productId] || 0;
   const isLoading = addingToCart[productId] || false;
-  const isOutOfStock = product.stock === 0;
+  const isOutOfStock = product.stock <= 0;
 
   if (isOutOfStock) {
     return (

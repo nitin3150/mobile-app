@@ -24,7 +24,7 @@ const ProductCard: React.FC<ProductCardProps> = ({
   updateCartQuantity,
 }) => {
   const imageUrl = getImageUrl(item.images);
-  const isOutOfStock = item.stock === 0;
+  const isOutOfStock = item.stock <= 0;
   
   const handleProductPress = () => {
     const productId = item.id;

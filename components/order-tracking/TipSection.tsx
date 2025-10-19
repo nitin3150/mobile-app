@@ -54,7 +54,7 @@ export const TipSection: React.FC<TipSectionProps> = ({
         Make their day by leaving a tip. 100% of the amount will go to them after delivery
       </Text>
       <View style={styles.tipOptions}>
-        {[20, 30, 50].map((amount) => (
+        {[10, 20, 50].map((amount) => (
           <TouchableOpacity
             key={amount}
             style={[
@@ -77,7 +77,7 @@ export const TipSection: React.FC<TipSectionProps> = ({
           style={[
             styles.tipButton, 
             selectedTip !== null && 
-            ![20, 30, 50].includes(selectedTip) && 
+            ![10, 20, 50].includes(selectedTip) && 
             styles.tipButtonSelected,
             saving && styles.tipButtonDisabled
           ]}
@@ -87,7 +87,7 @@ export const TipSection: React.FC<TipSectionProps> = ({
           <Text style={[
             styles.tipButtonText, 
             selectedTip !== null && 
-            ![20, 30, 50].includes(selectedTip) && 
+            ![10, 20, 50].includes(selectedTip) && 
             styles.tipButtonTextSelected
           ]}>
             Other

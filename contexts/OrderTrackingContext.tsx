@@ -14,8 +14,8 @@ interface Order {
     id?: string;  
     order_status: 'preparing' | 'assigning' | 'assigned' | 'out_for_delivery' | 'delivered' | 'arrived';
     delivery_partner?: DeliveryPartner;
-    estimated_delivery?: string;
-    actual_delivery?: string;
+    estimated_delivery_time?: number;
+    actual_delivery?: number;
     delivery_partner_location?: {
       latitude: number;
       longitude: number;
@@ -40,11 +40,15 @@ interface Order {
     promo_discount?: number;
     total_amount?: number;
     delivery_address?: {
+      label:string;
+      street:string;
       address: string;
       city: string;
       state: string;
       pincode: string;
       phone: string;
+      latitude: number;
+      longitude: number;
     };
     status_change_history?: Array<{
       status: string;
@@ -57,6 +61,7 @@ interface Order {
     preparing_at?: string;
     confirmed_at?: string;
     created_at?: string;
+    tip_amount?: number;
 }
 
 interface OrderTrackingContextType {
@@ -187,7 +192,7 @@ export function OrderTrackingProvider({ children }: { children: ReactNode }) {
   const dismissBanner = () => {
     console.log('❌ Dismissing banner');
     if (activeOrder?.order_status === 'delivered') {
-      setDismissedOrderId(activeOrder.id);
+      setDismissedOrderId(activeOrder.id || null);
       setActiveOrder(null);
     }
   };

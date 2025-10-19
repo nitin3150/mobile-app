@@ -1,3 +1,5 @@
+import { Float } from "react-native/Libraries/Types/CodegenTypes";
+
 export interface Order {
     _id: string;
     id: string;
@@ -15,6 +17,9 @@ export interface Order {
       city: string;
       state: string;
       pincode: string;
+      phone: string;
+      latitude: number;
+      longitude: number;
     };
     items?: Array<{
       product: string;

@@ -1,5 +1,4 @@
-// order-tracking.tsx - COMPLETE FIXED VERSION
-import React, { useState, useEffect } from 'react';
+import React, { useState, useRef,useEffect } from 'react';
 import {
   View,
   Text,
@@ -46,33 +45,103 @@ export default function OrderTrackingScreen() {
   const [countdownInitialized, setCountdownInitialized] = useState<string | null>(null);
 
   // Initialize countdown timer
+  // useEffect(() => {
+  //   if (!activeOrder) {
+  //     setTimeRemainingSeconds(null);
+  //     setCountdownInitialized(null);
+  //     return;
+  //   }
+  
+  //   const orderId = activeOrder.id;
+  //   const orderStatus = activeOrder.order_status;
+    
+  //   const validStatuses = ['assigned', 'out_for_delivery'];
+    
+  //   if (!validStatuses.includes(orderStatus)) {
+  //     setTimeRemainingSeconds(null);
+  //     setCountdownInitialized(null);
+  //     return;
+  //   }
+  
+  //   if (countdownInitialized === orderId) {
+  //     return;
+  //   }
+  
+  //   let estimatedMinutes = 30;
+  //   const rawValue = activeOrder.estimated_delivery_time;
+  //   console.log("raw time: ",rawValue)
+  //   if (rawValue && typeof rawValue === 'number') {
+  //     if (rawValue >= 5 && rawValue <= 60) {
+  //       estimatedMinutes = Math.round(rawValue);
+  //     } else if (rawValue > 60 && rawValue < 3600) {
+  //       const convertedMinutes = Math.round(rawValue / 60);
+  //       if (convertedMinutes >= 5 && convertedMinutes <= 60) {
+  //         estimatedMinutes = convertedMinutes;
+  //       }
+  //     }
+  //   }
+    
+  //   let remainingSeconds = estimatedMinutes * 60;
+    
+  //   if (activeOrder.assigned_at) {
+  //     try {
+  //       const assignedTime = new Date(activeOrder.assigned_at).getTime();
+  //       const currentTime = new Date().getTime();
+  //       const elapsedSeconds = Math.floor((currentTime - assignedTime) / 1000);
+  //       remainingSeconds = Math.max(0, remainingSeconds - elapsedSeconds);
+  //     } catch (error) {
+  //       console.error('⏱️ Error calculating time:', error);
+  //     }
+  //   }
+    
+  //   setTimeRemainingSeconds(remainingSeconds);
+  //   setCountdownInitialized(orderId || null);
+  // }, [activeOrder?.id, activeOrder?.order_status]);
+  const assignedTimeRef = useRef<number | null>(null); // 🕓 store assigned time in memory only
+
   useEffect(() => {
     if (!activeOrder) {
       setTimeRemainingSeconds(null);
       setCountdownInitialized(null);
+      assignedTimeRef.current = null;
       return;
     }
-  
+
     const orderId = activeOrder.id;
     const orderStatus = activeOrder.order_status;
-    
     const validStatuses = ['assigned', 'out_for_delivery'];
-    
+
     if (!validStatuses.includes(orderStatus)) {
       setTimeRemainingSeconds(null);
       setCountdownInitialized(null);
+      assignedTimeRef.current = null;
       return;
     }
+
+    // 🧠 Set assigned time only once when status becomes "assigned"
+    if (orderStatus === 'assigned' && !assignedTimeRef.current) {
+      assignedTimeRef.current = new Date(activeOrder.assigned_at || Date.now()).getTime();
+      // Log the raw milliseconds
+  console.log('⏱️ Assigned time (ms):', assignedTimeRef.current);
   
+  // Log as readable date
+  console.log('⏱️ Assigned time (Date):', new Date(assignedTimeRef.current).toString());
+  
+  // Log as ISO string
+  console.log('⏱️ Assigned time (ISO):', new Date(assignedTimeRef.current).toISOString());
+
+    }
+    // Prevent restarting the timer for same order
     if (countdownInitialized === orderId) {
       return;
     }
-  
+
+    // Default estimated time
     let estimatedMinutes = 30;
     const rawValue = activeOrder.estimated_delivery_time;
-    
+    console.log(rawValue)
     if (rawValue && typeof rawValue === 'number') {
-      if (rawValue >= 5 && rawValue <= 60) {
+      if (rawValue >= 5 && rawValue <= 30) {
         estimatedMinutes = Math.round(rawValue);
       } else if (rawValue > 60 && rawValue < 3600) {
         const convertedMinutes = Math.round(rawValue / 60);
@@ -81,23 +150,21 @@ export default function OrderTrackingScreen() {
         }
       }
     }
-    
+
     let remainingSeconds = estimatedMinutes * 60;
-    
-    if (activeOrder.assigned_at) {
-      try {
-        const assignedTime = new Date(activeOrder.assigned_at).getTime();
-        const currentTime = new Date().getTime();
-        const elapsedSeconds = Math.floor((currentTime - assignedTime) / 1000);
-        remainingSeconds = Math.max(0, remainingSeconds - elapsedSeconds);
-      } catch (error) {
-        console.error('⏱️ Error calculating time:', error);
-      }
+
+    // ⏱️ Calculate elapsed time since assigned
+    if (assignedTimeRef.current) {
+      const currentTime = Date.now();
+      const elapsedSeconds = Math.floor((currentTime - assignedTimeRef.current) / 1000);
+      console.log(elapsedSeconds)
+      remainingSeconds = Math.max(0, remainingSeconds - elapsedSeconds);
     }
-    
+
     setTimeRemainingSeconds(remainingSeconds);
-    setCountdownInitialized(orderId);
+    setCountdownInitialized(orderId || null);
   }, [activeOrder?.id, activeOrder?.order_status]);
+
 
   // Countdown update
   useEffect(() => {
@@ -411,7 +478,7 @@ export default function OrderTrackingScreen() {
 
         {/* Delivery Partner */}
         {showDeliveryPartner && (
-          <DeliveryPartnerCard partner={activeOrder.delivery_partner} />
+          <DeliveryPartnerCard partner={activeOrder.delivery_partner!} />
         )}
 
         {/* Delivery Details */}
@@ -426,7 +493,7 @@ export default function OrderTrackingScreen() {
             <Ionicons name="call-outline" size={24} color="#666" />
             <View style={styles.detailTextContainer}>
               <Text style={styles.detailTitle}>
-                {activeOrder.delivery_address?.mobile_number || activeOrder.delivery_address?.phone || 'Phone Number'}
+                {activeOrder.delivery_address?.phone || 'Phone Number'}
               </Text>
               <Text style={styles.detailSubtitle}>Delivery partner may call this number</Text>
             </View>
@@ -482,7 +549,7 @@ export default function OrderTrackingScreen() {
               </View>
               <View style={styles.ratePartnerTextContainer}>
                 <Text style={styles.ratePartnerTitle}>
-                  {activeOrder.delivery_partner.name || 'Delivery Partner'}
+                  {activeOrder.delivery_partner!.name || 'Delivery Partner'}
                 </Text>
                 <Text style={styles.ratePartnerSubtitle}>How was your delivery experience?</Text>
               </View>

@@ -352,34 +352,6 @@ export default function AddressScreen() {
     }
   };
 
-  // Set default address
-  // const selectAndSetDefault = async (address: SavedAddress) => {
-  //   try {
-  //     const response = await authenticatedFetch(
-  //       `${API_ENDPOINTS.USER_ADDRESS}/${address._id}/set-default`,
-  //       {
-  //         method: 'POST',
-  //       }
-  //     );
-
-  //     if (response.ok) {
-  //       setSelectedAddress(address);
-        
-  //       if (isFromCheckout) {
-  //         router.back();
-  //       } else {
-  //         Alert.alert('Success', 'Default address updated');
-  //         await fetchSavedAddresses();
-  //       }
-  //     } else {
-  //       Alert.alert('Error', 'Failed to set default address');
-  //     }
-  //   } catch (error) {
-  //     console.error('Error setting default address:', error);
-  //     Alert.alert('Error', 'Network error. Please try again.');
-  //   }
-  // };
-
   const selectAndSetDefault = async (address: SavedAddress) => {
     try {
       const response = await authenticatedFetch(
