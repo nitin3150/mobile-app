@@ -1,5 +1,3 @@
-// app/_layout.tsx - ROOT LAYOUT - COMPLETE WORKING VERSION
-
 import { useEffect } from 'react';
 import { Stack, router, useSegments, useRootNavigationState } from 'expo-router';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';

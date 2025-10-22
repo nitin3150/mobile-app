@@ -101,18 +101,6 @@ export default function LoginScreen() {
       // if (result.success) {
       //   console.log('🎉 Google login successful!');
         
-      //   if (result.requires_phone) {
-      //     console.log('📱 Phone number required, redirecting...');
-      //     router.replace('/auth/phone');
-      //   } else {
-      //     console.log('🏠 Redirecting to home...');
-      //     router.replace('/(tabs)');
-      //   }
-      // } else {
-      //   console.error('❌ Google login failed:', result.error);
-      //   Alert.alert(
-      //     'Google Login Failed',
-      //     result.error || 'Unable to sign in with Google. Please try again.'
       //   );
       // }
       if (result.success) {
@@ -163,30 +151,6 @@ export default function LoginScreen() {
   //     console.log('📧 Starting regular login...');
   //     const result = await login(emailOrPhone, password);
 
-  //     if (result.success) {
-  //       console.log('✅ Regular login successful!');
-  //       if (result.requires_phone) {
-  //         console.log('📱 Phone number required, redirecting...');
-  //         router.replace('/auth/phone');
-  //       } else {
-  //         console.log('🏠 Redirecting to home...');
-  //         router.replace('/(tabs)');
-  //       }
-  //     } else {
-  //       console.error('❌ Regular login failed:', result.error);
-  //       Alert.alert(
-  //         'Login Failed',
-  //         result.error || 'Invalid credentials. Please try again.'
-  //       );
-  //     }
-  //   } catch (error) {
-  //     console.error('❌ Login error:', error);
-  //     Alert.alert(
-  //       'Error',
-  //       'Network error. Please check your connection and try again.'
-  //     );
-  //   } finally {
-  //     setLoading(false);
   //   }
   // };
 
@@ -311,7 +275,6 @@ export default function LoginScreen() {
               <View style={styles.dividerLine} />
             </View>
 
-            {/* Google Sign-In Button */}
             <TouchableOpacity
               style={[styles.googleButton, (loading || googleLoading) && styles.buttonDisabled]}
               onPress={signInWithGoogle}
